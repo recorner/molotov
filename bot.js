@@ -8,10 +8,21 @@ import { showRootCategories } from './handlers/rootCategoryHandler.js';
 import { handleStart } from './handlers/userHandler.js';
 import { handleCategoryNavigation } from './handlers/categoryHandler.js';
 import { showProductsInCategory } from './handlers/productHandler.js';
+import { handleWalletCallback } from './handlers/walletHandler.js';
+import { setupDailyWalletPrompt, handleWalletPromptResponse } from './scheduler.js';
+import { handleWalletInput, handleWalletFinalSave } from './handlers/walletHandler.js';
+
+
+
+
+
+
 
 // Future stubs - ready to plug in later
 import { handleBuyCallback, handlePaymentSelection, handlePaymentConfirmation } from './handlers/paymentHandler.js';
 import { handleAdminCommand } from './handlers/adminHandler.js';
+import { handleAdminCallback } from './handlers/adminHandler.js';
+
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
@@ -22,6 +33,15 @@ bot.onText(/\/start/, (msg) => handleStart(bot, msg));
 bot.onText(/^\/(addcategory|addsubcategory|addproduct)(.*)/, (msg) => {
   handleAdminCommand(bot, msg);
 });
+bot.onText(/\/cocktail/, (msg) => handleAdminCommand(bot, msg));
+bot.on('message', async (msg) => {
+  if (!msg.text || msg.text.startsWith('/')) return;
+
+  await handleWalletInput(bot, msg);
+});
+setupDailyWalletPrompt(bot);
+
+
 
 // === CALLBACKS ===
 bot.on('callback_query', async (query) => {
@@ -71,6 +91,30 @@ bot.on('callback_query', async (query) => {
       return await handlePaymentConfirmation(bot, query);
     }
 
+
+
+    // Admin panel routing
+    if (
+      data.startsWith('panel_') ||
+      data === 'cocktail_back'
+    ) {
+      return handleAdminCallback(bot, query);
+    }
+    //wallet prompt
+    if (data.startsWith('walletcheck_')) {
+      return handleWalletPromptResponse(bot, query);
+    }
+    if (data === 'wallet_save_confirm') {
+      return handleWalletFinalSave(bot, query);
+    }
+
+    // wallet manager
+    if (data.startsWith('wallet_')) {
+      return handleWalletCallback(bot, query);
+    }
+    
+
+
     // Fallback for unknown
     return await bot.answerCallbackQuery(query.id, { text: '🤷 Unknown action.' });
 
@@ -79,6 +123,8 @@ bot.on('callback_query', async (query) => {
     return await bot.answerCallbackQuery(query.id, { text: '⚠️ Error processing your action.' });
   }
 });
+
+
 
 
 

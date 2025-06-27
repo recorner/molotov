@@ -1,7 +1,5 @@
 // database.js
 import sqlite3 from 'sqlite3';
-import { DB_PATH } from './config.js';
-
 const db = new sqlite3.Database('./store.db', (err) => {
   if (err) console.error('[DB] Error:', err.message);
   else console.log('[DB] SQLite store initialized.');
@@ -51,6 +49,27 @@ db.serialize(() => {
     }
   });
 });
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS wallet_addresses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      currency TEXT NOT NULL,
+      address TEXT NOT NULL,
+      label TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      added_by INTEGER NOT NULL,
+      added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Wallet Table Error:', err.message);
+    } else {
+      console.log('[DB] Wallet table ready.');
+    }
+  });
+});
+
+
 
 db.serialize(() => {
   db.run(`
