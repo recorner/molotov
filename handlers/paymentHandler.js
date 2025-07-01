@@ -44,49 +44,61 @@ export async function handlePaymentSelection(bot, query) {
       return bot.answerCallbackQuery(query.id, { text: '❌ Product not found.' });
     }
 
-    const address = currency === 'btc' ? BTC_ADDRESS : LTC_ADDRESS;
-    const price = product.price;
+    // First try getting address from DB
+    db.get(`
+      SELECT address FROM wallet_addresses 
+      WHERE currency = ? 
+      ORDER BY added_at DESC LIMIT 1
+    `, [currency.toUpperCase()], (dbErr, row) => {
+      if (dbErr) {
+        console.error('[DB] Wallet fetch error:', dbErr.message);
+        return bot.answerCallbackQuery(query.id, { text: '❌ DB Error fetching wallet' });
+      }
 
-    db.run(`
-      INSERT INTO orders (user_id, product_id, price, currency)
-      VALUES (?, ?, ?, ?)`,
-      [from.id, product.id, price, currency.toUpperCase()],
-      function (err) {
-        if (err) {
-          console.error('[DB] Order Insert Error:', err.message);
-          return bot.answerCallbackQuery(query.id, { text: '❌ Error creating order.' });
-        }
+      const fallbackAddress = currency === 'btc' ? BTC_ADDRESS : LTC_ADDRESS;
+      const address = row?.address || fallbackAddress;
+      const price = product.price;
 
-        const orderId = this.lastID;
-
-        // ✅ Send admin notification BEFORE prompting user
-        const adminMsg = `📢 *New Payment Initiated*\n\n` +
-          `🧾 Order ID: *#${orderId}*\n` +
-          `👤 User: [${from.first_name}](tg://user?id=${from.id})\n` +
-          `🛍️ Product: *${product.name}*\n` +
-          `💵 Amount: *$${price}* (${currency.toUpperCase()})\n` +
-          `🏦 Address: \`${address}\`\n` +
-          `🕒 Time: ${new Date().toLocaleString()}`;
-
-        notifyGroup(bot, adminMsg, { parse_mode: 'Markdown' });
-
-        // ✅ Then send payment instructions to user
-        const msg = `💰 *Payment Details:*\n\n` +
-          `🧾 Order ID: *#${orderId}*\n` +
-          `💵 Amount: *$${price}*\n` +
-          `🪙 Currency: *${currency.toUpperCase()}*\n` +
-          `🏦 Address: \`${address}\`\n\n` +
-          `After sending payment, confirm using the button below 👇`;
-
-        bot.sendMessage(query.message.chat.id, msg, {
-          parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '✅ I\'ve Paid', callback_data: `confirm_${orderId}` }]
-            ]
+      db.run(`
+        INSERT INTO orders (user_id, product_id, price, currency)
+        VALUES (?, ?, ?, ?)`,
+        [from.id, product.id, price, currency.toUpperCase()],
+        function (insertErr) {
+          if (insertErr) {
+            console.error('[DB] Order Insert Error:', insertErr.message);
+            return bot.answerCallbackQuery(query.id, { text: '❌ Error creating order.' });
           }
-        });
-      });
+
+          const orderId = this.lastID;
+
+          const adminMsg = `📢 *New Payment Initiated*\n\n` +
+            `🧾 Order ID: *#${orderId}*\n` +
+            `👤 User: [${from.first_name}](tg://user?id=${from.id})\n` +
+            `🛍️ Product: *${product.name}*\n` +
+            `💵 Amount: *$${price}* (${currency.toUpperCase()})\n` +
+            `🏦 Address: \`${address}\`\n` +
+            `🕒 Time: ${new Date().toLocaleString()}`;
+
+          notifyGroup(bot, adminMsg, { parse_mode: 'Markdown' });
+
+          const msg = `💰 *Payment Details:*\n\n` +
+            `🧾 Order ID: *#${orderId}*\n` +
+            `💵 Amount: *$${price}*\n` +
+            `🪙 Currency: *${currency.toUpperCase()}*\n` +
+            `🏦 Address: \`${address}\`\n\n` +
+            `After sending payment, confirm using the button below 👇`;
+
+          bot.sendMessage(query.message.chat.id, msg, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '✅ I\'ve Paid', callback_data: `confirm_${orderId}` }]
+              ]
+            }
+          });
+        }
+      );
+    });
   });
 }
 
