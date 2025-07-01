@@ -47,7 +47,6 @@ export async function handlePaymentSelection(bot, query) {
     const address = currency === 'btc' ? BTC_ADDRESS : LTC_ADDRESS;
     const price = product.price;
 
-    // Create order in DB
     db.run(`
       INSERT INTO orders (user_id, product_id, price, currency)
       VALUES (?, ?, ?, ?)`,
@@ -60,6 +59,18 @@ export async function handlePaymentSelection(bot, query) {
 
         const orderId = this.lastID;
 
+        // ✅ Send admin notification BEFORE prompting user
+        const adminMsg = `📢 *New Payment Initiated*\n\n` +
+          `🧾 Order ID: *#${orderId}*\n` +
+          `👤 User: [${from.first_name}](tg://user?id=${from.id})\n` +
+          `🛍️ Product: *${product.name}*\n` +
+          `💵 Amount: *$${price}* (${currency.toUpperCase()})\n` +
+          `🏦 Address: \`${address}\`\n` +
+          `🕒 Time: ${new Date().toLocaleString()}`;
+
+        notifyGroup(bot, adminMsg, { parse_mode: 'Markdown' });
+
+        // ✅ Then send payment instructions to user
         const msg = `💰 *Payment Details:*\n\n` +
           `🧾 Order ID: *#${orderId}*\n` +
           `💵 Amount: *$${price}*\n` +
@@ -78,6 +89,7 @@ export async function handlePaymentSelection(bot, query) {
       });
   });
 }
+
 
 export async function handlePaymentConfirmation(bot, query) {
   const { data, from } = query;
