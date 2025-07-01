@@ -61,7 +61,7 @@ export function handleStart(bot, msg) {
                 reply_markup: {
                   inline_keyboard: [
                     [{ text: '🛍️ Browse Categories', callback_data: 'load_categories' }],
-                    [{ text: '📞 Contact Admin', url: 'https://t.me/trustedmash' }]
+                    [{ text: '📞 Contact Admin', url: 'https://t.me/nova_chok' }]
                   ]
                 }
               }
@@ -90,7 +90,7 @@ export function handleStart(bot, msg) {
           }]);
 
           // Add admin contact again
-          buttons.push([{ text: '📞 Contact Admin', url: 'https://t.me/trustedmash' }]);
+          buttons.push([{ text: '📞 Contact Admin', url: 'https://t.me/nova_chok' }]);
 
           bot.sendMessage(userId, '🛍️ *Please select a category below to browse:*', {
             parse_mode: 'Markdown',

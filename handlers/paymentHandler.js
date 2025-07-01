@@ -106,7 +106,7 @@ export async function handlePaymentConfirmation(bot, query) {
       return bot.answerCallbackQuery(query.id, { text: '❌ Order not found.' });
     }
 
-    bot.sendMessage(query.message.chat.id, '✅ Payment initialized. Please wait while we verify your transaction. for queries please contact @trustedmash');
+    bot.sendMessage(query.message.chat.id, '✅ Payment initialized. Please wait while we verify your transaction. for queries please contact @nova_chok');
 
     // Notify group
     const msg = `📥 *Payment Confirmation Request*\n\n` +
