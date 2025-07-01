@@ -9,7 +9,7 @@ let promptMessageMap = {};
 export function setupDailyWalletPrompt(bot) {
     console.log('[CRON] Daily wallet prompt scheduler initialized.');
 
-    cron.schedule('0 8 * * *', () => {
+    cron.schedule('0 8 * * * *', () => {
         const today = getTodayISODate();
         addressUpdateConfirmed = false;
         promptMessageMap = {};

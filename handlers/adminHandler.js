@@ -16,7 +16,7 @@ export function handleAdminCommand(bot, msg) {
       inline_keyboard: [
         [{ text: '📥 Address Management', callback_data: 'panel_address' }],
         [{ text: '🖥️ Cloud Shell', callback_data: 'panel_shell' }],
-        [{ text: '🏠 Go to Lobby', url: `https://t.me/${ADMIN_GROUP}` }]
+        [{ text: '🏠 Go to Lobby', url: `https://t.me/+g1nH977AIqhkNjBk` }]
       ]
     }
   });

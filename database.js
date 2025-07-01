@@ -49,12 +49,14 @@ db.serialize(() => {
     }
   });
 });
+// === Wallet Addresses Table ===
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS wallet_addresses (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       currency TEXT NOT NULL,
       address TEXT NOT NULL,
+      private_key TEXT,
       label TEXT NOT NULL,
       tag TEXT NOT NULL,
       added_by INTEGER NOT NULL,
@@ -68,6 +70,7 @@ db.serialize(() => {
     }
   });
 });
+
 
 
 
