@@ -1,6 +1,6 @@
 // bot.js
 import TelegramBot from 'node-telegram-bot-api';
-import { BOT_TOKEN } from './config.js';
+import { BOT_TOKEN, ADMIN_GROUP } from './config.js';
 import './database.js'; // Load and initialize DB
 
 // Handlers
@@ -28,6 +28,11 @@ import { handleAdminCallback } from './handlers/adminHandler.js';
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 console.log('[BOT] Telegram Digital Store is live.');
+bot.sendMessage(
+  ADMIN_GROUP,
+  `🔁 *molotov bot restarted*\n🟢 Status: Online\n🕒 ${new Date().toLocaleString()}`,
+  { parse_mode: 'Markdown' }
+);
 
 // === COMMANDS ===
 bot.onText(/\/start/, (msg) => handleStart(bot, msg));
@@ -109,7 +114,7 @@ bot.on('callback_query', async (query) => {
     if (data.startsWith('wallet_')) {
       return handleWalletCallback(bot, query);
     }
-    
+
     // Admin payment actions
     if (data.startsWith('admin_confirm_') || data.startsWith('admin_cancel_')) {
       return await handleAdminPaymentAction(bot, query);
@@ -127,21 +132,21 @@ bot.on('callback_query', async (query) => {
 // === RAW MESSAGES ===
 bot.on('message', async (msg) => {
   const { text, document, photo } = msg;
-  
+
   console.log('[DEBUG] Message received:', {
     hasReply: !!msg.reply_to_message,
     replyText: msg.reply_to_message?.text?.substring(0, 50),
     messageType: document ? 'document' : photo ? 'photo' : text ? 'text' : 'other',
     chatId: msg.chat.id
   });
-  
+
   // Handle product delivery uploads (files, photos, and text)
   if (msg.reply_to_message && msg.reply_to_message.text?.includes('Please Upload Product Details')) {
     console.log('[DEBUG] Product delivery detected, full reply text:', msg.reply_to_message.text);
     // Try multiple regex patterns to match different formats
-    const orderIdMatch = msg.reply_to_message.text.match(/Order ID: #(\d+)/) || 
-                        msg.reply_to_message.text.match(/Order ID: \*#(\d+)\*/) ||
-                        msg.reply_to_message.text.match(/#(\d+)/);
+    const orderIdMatch = msg.reply_to_message.text.match(/Order ID: #(\d+)/) ||
+      msg.reply_to_message.text.match(/Order ID: \*#(\d+)\*/) ||
+      msg.reply_to_message.text.match(/#(\d+)/);
     console.log('[DEBUG] Order ID match:', orderIdMatch);
     if (orderIdMatch) {
       console.log('[DEBUG] Processing delivery for order:', orderIdMatch[1]);
