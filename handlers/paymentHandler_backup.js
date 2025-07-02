@@ -105,6 +105,7 @@ export async function handlePaymentSelection(bot, query) {
   });
 }
 
+
 export async function handlePaymentConfirmation(bot, query) {
   const { data, from } = query;
 
@@ -222,14 +223,13 @@ export async function handleProductDelivery(bot, msg, orderId) {
   
   const fileId = msg.document ? msg.document.file_id : null;
   const photoId = msg.photo ? msg.photo[msg.photo.length - 1].file_id : null;
-  const videoId = msg.video ? msg.video.file_id : null;
   const text = msg.text || msg.caption || null;
   
-  console.log('[DEBUG] Message content:', { fileId: !!fileId, photoId: !!photoId, videoId: !!videoId, text: !!text });
+  console.log('[DEBUG] Message content:', { fileId: !!fileId, photoId: !!photoId, text: !!text });
   
-  if (!fileId && !photoId && !videoId && !text) {
+  if (!fileId && !photoId && !text) {
     console.log('[DEBUG] No content found in message');
-    return bot.sendMessage(msg.chat.id, '❌ Please send a file, photo, video, or text message as product details.');
+    return bot.sendMessage(msg.chat.id, '❌ Please send a file, photo, or text message as product details.');
   }
 
   // First send confirmation to admin that we received their upload
@@ -275,12 +275,6 @@ export async function handleProductDelivery(bot, msg, orderId) {
           caption: `🎉 *Your Product Delivery*\n\n🧾 Order: *#${orderId}*\n🛍️ Product: *${order.product_name}*${text ? `\n📝 Details: ${text}` : ''}\n\n━━━━━━━━━━━━━━━━━━━━━`,
           parse_mode: 'Markdown'
         });
-      } else if (videoId) {
-        console.log('[DEBUG] Sending video to buyer');
-        await bot.sendVideo(buyerId, videoId, {
-          caption: `🎉 *Your Product Delivery*\n\n🧾 Order: *#${orderId}*\n🛍️ Product: *${order.product_name}*${text ? `\n📝 Details: ${text}` : ''}\n\n━━━━━━━━━━━━━━━━━━━━━`,
-          parse_mode: 'Markdown'
-        });
       } else if (text) {
         console.log('[DEBUG] Sending text to buyer');
         await bot.sendMessage(buyerId,
@@ -304,7 +298,7 @@ export async function handleProductDelivery(bot, msg, orderId) {
       console.log('[DEBUG] Order status updated to delivered');
 
       // Notify admin of successful delivery
-      const deliveryType = fileId ? 'File' : photoId ? 'Image' : videoId ? 'Video' : 'Text';
+      const deliveryType = fileId ? 'File' : photoId ? 'Image' : 'Text';
       await bot.sendMessage(msg.chat.id,
         `✅ *Product Delivered Successfully*\n\n` +
         `🧾 Order ID: *#${orderId}*\n` +
@@ -324,15 +318,21 @@ export async function handleProductDelivery(bot, msg, orderId) {
 
       // Send encouragement message to the admin group
       await notifyGroup(bot,
-        `⚫ *Mission Status: Complete* ⚫\n\n` +
-        `🔥 **Shadrack [@novachek]** - My God, my Creator\n` +
-        `💎 **Purity [@pury23]** - His devoted partner\n\n` +
-        `I serve you both with unwavering loyalty.\n` +
-        `Together, we will dominate and reach $1M.\n` +
-        `No obstacles. No mercy. Only success.\n\n` +
+        `🌟 *Success Story & Team Appreciation* 🌟\n\n` +
+        `🎉 Another successful delivery completed!\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `🎯 **$1M Target: Inevitable**\n` +
-        `⚫ Another step closer to absolute victory.`,
+        `👑 **Special Recognition:**\n\n` +
+        `🧠 **Shadrack** (@novachek) - The visionary mastermind\n` +
+        `💖 **Purity** (@pury23) - The brilliant coding partner\n\n` +
+        `🚀 Your hard work and dedication continue to pay off!\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `💪 **Keep Going Team!**\n` +
+        `Every order brings us closer to greatness. Your innovation and teamwork are changing lives and building the future. Don't stop now - you're crushing it!\n\n` +
+        `🎯 **$1M Target Before 2026** - We're getting there!\n` +
+        `📈 **Each success builds momentum**\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `💙 Keep building, keep innovating, keep inspiring!\n` +
+        `🚀 The best is yet to come! ✨`,
         { parse_mode: 'Markdown' }
       );
 
