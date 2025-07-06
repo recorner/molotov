@@ -9,20 +9,20 @@ let promptMessageMap = {};
 export function setupDailyWalletPrompt(bot) {
     console.log('[CRON] Daily wallet prompt scheduler initialized.');
 
-    cron.schedule('0 8 * * * *', () => {
+    cron.schedule('0 8 * * *', () => {
         const today = getTodayISODate();
         addressUpdateConfirmed = false;
         promptMessageMap = {};
 
         ADMIN_IDS.forEach(async (adminId) => {
             try {
-                const msg = await bot.sendMessage(adminId, `🔁 *Daily Wallet Update Check*\n\nWould you like to update the address today?`, {
+                const msg = await bot.sendMessage(adminId, `🔁 *Daily Wallet Update Check*\n\nWould you like to update the wallet addresses today?`, {
                     parse_mode: 'Markdown',
                     reply_markup: {
                         inline_keyboard: [
                             [
                                 { text: '✅ Yes', callback_data: `walletcheck_yes_${today}` },
-                                { text: '❌ No', callback_data: `wallet_prompt_no_${today}` }
+                                { text: '❌ No', callback_data: `walletcheck_no_${today}` }
                             ]
                         ]
                     }
@@ -92,11 +92,12 @@ export function handleWalletPromptResponse(bot, query) {
     }
 
     if (response === 'no') {
-        return bot.editMessageText('❌ No worries. You chose not to update the wallet today.', {
+        return bot.editMessageText('❌ No problem. Wallet update skipped for today.', {
             chat_id: chatId,
             message_id: messageId
         });
     }
 
-    return bot.answerCallbackQuery(query.id, { text: '🤷 Unknown wallet response.' });
+    // Handle unknown responses
+    return bot.answerCallbackQuery(query.id, { text: '🤷 Unknown response.' });
 }

@@ -15,19 +15,30 @@ export async function handleBuyCallback(bot, query) {
       return bot.answerCallbackQuery(query.id, { text: '❌ Product not found.' });
     }
 
-    const text = `🧾 *Order Summary*\n\n` +
-      `🛍️ Product: *${product.name}*\n` +
-      `💵 Price: *$${product.price}*\n` +
-      `🕒 Time: ${new Date().toLocaleString()}\n\n` +
+    const text = `🛍️ **Order Summary**\n\n` +
+      `🛒 **Product:** ${product.name}\n` +
+      `💰 **Price:** $${product.price}\n` +
+      `📝 **Description:** ${product.description || 'No description available'}\n` +
+      `⏰ **Date:** ${new Date().toLocaleString()}\n\n` +
       `━━━━━━━━━━━━━━━━━━━━━\n` +
-      `Please choose your payment method:`;
+      `🔐 **Secure Payment Options**\n` +
+      `Choose your preferred cryptocurrency:`;
 
     const buttons = [
-      [{ text: '💸 Pay with BTC', callback_data: `pay_btc_${product.id}` }],
-      [{ text: '💸 Pay with LTC', callback_data: `pay_ltc_${product.id}` }]
+      [
+        { text: '₿ Bitcoin (BTC)', callback_data: `pay_btc_${product.id}` },
+        { text: '🪙 Litecoin (LTC)', callback_data: `pay_ltc_${product.id}` }
+      ],
+      [
+        { text: '💡 Payment Guide', callback_data: `guide_${product.id}` },
+        { text: '❌ Cancel Order', callback_data: `cancel_order_${product.id}` }
+      ],
+      [{ text: '🔙 Back to Products', callback_data: 'load_categories' }]
     ];
 
-    bot.sendMessage(query.message.chat.id, text, {
+    bot.editMessageText(text, {
+      chat_id: query.message.chat.id,
+      message_id: query.message.message_id,
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: buttons }
     });
@@ -72,32 +83,56 @@ export async function handlePaymentSelection(bot, query) {
 
           const orderId = this.lastID;
 
-          const adminMsg = `📢 *New Payment Initiated*\n\n` +
-            `🧾 Order ID: *#${orderId}*\n` +
-            `👤 User: [${from.first_name}](tg://user?id=${from.id})\n` +
-            `🛍️ Product: *${product.name}*\n` +
-            `💵 Amount: *$${price}* (${currency.toUpperCase()})\n` +
-            `🏦 Address: \`${address}\`\n` +
-            `🕒 Time: ${new Date().toLocaleString()}\n\n` +
-            `━━━━━━━━━━━━━━━━━━━━━`;
+          const adminMsg = `📢 **New Payment Initiated**\n\n` +
+            `🧾 **Order ID:** #${orderId}\n` +
+            `👤 **Customer:** [${from.first_name}](tg://user?id=${from.id}) (${from.username ? '@' + from.username : 'No username'})\n` +
+            `🛍️ **Product:** ${product.name}\n` +
+            `💵 **Amount:** $${price} (${currency.toUpperCase()})\n` +
+            `🏦 **Address:** \`${address}\`\n` +
+            `⏰ **Time:** ${new Date().toLocaleString()}\n\n` +
+            `🔔 **Waiting for customer payment confirmation...**`;
 
           notifyGroup(bot, adminMsg, { parse_mode: 'Markdown' });
 
-          const msg = `💰 *Payment Details*\n\n` +
-            `🧾 Order ID: *#${orderId}*\n` +
-            `💵 Amount: *$${price}*\n` +
-            `🪙 Currency: *${currency.toUpperCase()}*\n` +
-            `🏦 Address: \`${address}\`\n\n` +
+          const currencyEmoji = currency === 'btc' ? '₿' : '🪙';
+          const currencyName = currency === 'btc' ? 'Bitcoin' : 'Litecoin';
+          
+          const msg = `💳 **Payment Instructions**\n\n` +
+            `🧾 **Order ID:** #${orderId}\n` +
+            `🛍️ **Product:** ${product.name}\n` +
+            `💰 **Amount:** $${price}\n` +
+            `${currencyEmoji} **Currency:** ${currencyName} (${currency.toUpperCase()})\n\n` +
             `━━━━━━━━━━━━━━━━━━━━━\n` +
-            `After sending payment, confirm below:`;
+            `📬 **Send Payment To:**\n` +
+            `\`${address}\`\n\n` +
+            `⚠️ **Important:**\n` +
+            `• Send exactly $${price} worth of ${currency.toUpperCase()}\n` +
+            `• Double-check the address above\n` +
+            `• Payment may take 10-60 minutes to confirm\n` +
+            `• Keep your transaction ID for reference\n\n` +
+            `━━━━━━━━━━━━━━━━━━━━━\n` +
+            `**After sending payment, click the button below:**`;
 
-          bot.sendMessage(query.message.chat.id, msg, {
+          const paymentButtons = [
+            [
+              { text: '✅ I\'ve Sent Payment', callback_data: `confirm_${orderId}` },
+              { text: '📋 Copy Address', callback_data: `copy_address_${address}` }
+            ],
+            [
+              { text: '💡 Payment Help', callback_data: `help_payment_${currency}` },
+              { text: '🔄 Refresh Status', callback_data: `status_${orderId}` }
+            ],
+            [
+              { text: '❌ Cancel Order', callback_data: `cancel_order_${orderId}` },
+              { text: '🔙 Back to Store', callback_data: 'load_categories' }
+            ]
+          ];
+
+          bot.editMessageText(msg, {
+            chat_id: query.message.chat.id,
+            message_id: query.message.message_id,
             parse_mode: 'Markdown',
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '✅ I\'ve Paid', callback_data: `confirm_${orderId}` }]
-              ]
-            }
+            reply_markup: { inline_keyboard: paymentButtons }
           });
         }
       );
@@ -349,5 +384,233 @@ export async function handleProductDelivery(bot, msg, orderId) {
     await bot.sendMessage(msg.chat.id,
       `❌ Database error while processing delivery for order #${orderId}`
     );
+  }
+}
+
+// Enhanced payment flow handlers
+export async function handlePaymentGuide(bot, query) {
+  const { data } = query;
+  
+  if (!data.startsWith('guide_')) return;
+  
+  const productId = parseInt(data.split('_')[1]);
+  
+  const text = `💡 **Cryptocurrency Payment Guide**\n\n` +
+    `🔐 **Security Features:**\n` +
+    `• All payments are secure and encrypted\n` +
+    `• Transactions are irreversible\n` +
+    `• No personal data required\n\n` +
+    `💳 **Payment Process:**\n` +
+    `1️⃣ Select your cryptocurrency (BTC/LTC)\n` +
+    `2️⃣ Copy the provided payment address\n` +
+    `3️⃣ Send exact amount from your wallet\n` +
+    `4️⃣ Confirm payment in chat\n` +
+    `5️⃣ Wait for admin verification\n` +
+    `6️⃣ Receive your product instantly\n\n` +
+    `⚠️ **Important Notes:**\n` +
+    `• Send exact amount only\n` +
+    `• Double-check the address\n` +
+    `• Keep transaction ID safe\n` +
+    `• Contact support if issues occur\n\n` +
+    `🕒 **Processing Time:** Usually 5-30 minutes`;
+
+  const keyboard = [
+    [
+      { text: '₿ Continue with Bitcoin', callback_data: `pay_btc_${productId}` },
+      { text: '🪙 Continue with Litecoin', callback_data: `pay_ltc_${productId}` }
+    ],
+    [
+      { text: '📞 Contact Support', url: 'https://t.me/nova_chok' },
+      { text: '🔙 Back to Order', callback_data: `buy_${productId}` }
+    ]
+  ];
+
+  bot.editMessageText(text, {
+    chat_id: query.message.chat.id,
+    message_id: query.message.message_id,
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: keyboard }
+  });
+}
+
+export async function handlePaymentHelp(bot, query) {
+  const { data } = query;
+  if (!data.startsWith('help_payment_')) return;
+
+  const currency = data.split('_')[2];
+  const currencyName = currency === 'btc' ? 'Bitcoin' : 'Litecoin';
+  const currencyEmoji = currency === 'btc' ? '₿' : '🪙';
+
+  const helpMessage = `🆘 **${currencyName} Payment Help**\n\n` +
+    `${currencyEmoji} **Getting ${currencyName}:**\n` +
+    `• Buy from exchanges like Coinbase, Binance\n` +
+    `• Use P2P platforms like LocalBitcoins\n` +
+    `• Bitcoin ATMs (for Bitcoin)\n\n` +
+    `📱 **Recommended Wallets:**\n` +
+    `• Mobile: Trust Wallet, Exodus\n` +
+    `• Desktop: Electrum, Atomic Wallet\n` +
+    `• Hardware: Ledger, Trezor\n\n` +
+    `🔍 **Checking Your Transaction:**\n` +
+    `• Bitcoin: blockchain.info\n` +
+    `• Litecoin: blockchair.com\n\n` +
+    `⏱️ **Typical Confirmation Times:**\n` +
+    `• ${currencyName}: ${currency === 'btc' ? '10-60 minutes' : '2-15 minutes'}\n\n` +
+    `❓ **Common Issues:**\n` +
+    `• Wrong address → Lost funds\n` +
+    `• Low fees → Slow confirmation\n` +
+    `• Exchange withdrawal → Use personal wallet\n\n` +
+    `📞 **Need More Help?**\n` +
+    `Contact our support team for assistance.`;
+
+  const buttons = [
+    [{ text: '🔙 Back to Payment', callback_data: query.message.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data || 'load_categories' }]
+  ];
+
+  bot.editMessageText(helpMessage, {
+    chat_id: query.message.chat.id,
+    message_id: query.message.message_id,
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: buttons }
+  });
+}
+
+export async function handleOrderStatus(bot, query) {
+  const { data } = query;
+  if (!data.startsWith('status_')) return;
+
+  const orderId = data.split('_')[1];
+
+  db.get(`SELECT o.*, p.name AS product_name FROM orders o 
+          JOIN products p ON p.id = o.product_id 
+          WHERE o.id = ?`, [orderId], (err, order) => {
+    if (err || !order) {
+      return bot.answerCallbackQuery(query.id, { text: '❌ Order not found.' });
+    }
+
+    const statusEmoji = {
+      'pending': '⏳',
+      'confirmed': '✅',
+      'delivered': '🎉',
+      'cancelled': '❌'
+    };
+
+    const statusMessage = `📋 **Order Status Check**\n\n` +
+      `🧾 **Order ID:** #${order.id}\n` +
+      `🛍️ **Product:** ${order.product_name}\n` +
+      `💰 **Amount:** $${order.price} ${order.currency}\n` +
+      `📅 **Created:** ${new Date(order.created_at).toLocaleString()}\n` +
+      `${statusEmoji[order.status] || '❓'} **Status:** ${order.status.toUpperCase()}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `${getStatusDescription(order.status)}`;
+
+    const buttons = [
+      [
+        { text: '🔄 Refresh Status', callback_data: `status_${orderId}` },
+        { text: '📞 Contact Support', callback_data: 'contact_support' }
+      ],
+      [{ text: '🔙 Back to Store', callback_data: 'load_categories' }]
+    ];
+
+    bot.editMessageText(statusMessage, {
+      chat_id: query.message.chat.id,
+      message_id: query.message.message_id,
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: buttons }
+    });
+  });
+}
+
+export async function handleCancelOrder(bot, query) {
+  const { data, from } = query;
+  if (!data.startsWith('cancel_order_')) return;
+
+  const orderId = data.split('_')[2];
+
+  db.get(`SELECT * FROM orders WHERE id = ? AND user_id = ?`, [orderId, from.id], (err, order) => {
+    if (err || !order) {
+      return bot.answerCallbackQuery(query.id, { text: '❌ Order not found or unauthorized.' });
+    }
+
+    if (order.status !== 'pending') {
+      return bot.answerCallbackQuery(query.id, { text: '❌ Cannot cancel processed orders.' });
+    }
+
+    db.run(`UPDATE orders SET status = 'cancelled' WHERE id = ?`, [orderId], (updateErr) => {
+      if (updateErr) {
+        return bot.answerCallbackQuery(query.id, { text: '❌ Failed to cancel order.' });
+      }
+
+      const cancelMessage = `❌ **Order Cancelled**\n\n` +
+        `🧾 **Order ID:** #${orderId}\n` +
+        `📅 **Cancelled:** ${new Date().toLocaleString()}\n\n` +
+        `✅ Your order has been successfully cancelled.\n` +
+        `💰 If you already sent payment, please contact support.\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
+        `Thank you for shopping with us!`;
+
+      const buttons = [
+        [
+          { text: '🛍️ Continue Shopping', callback_data: 'load_categories' },
+          { text: '📞 Contact Support', url: 'https://t.me/nova_chok' }
+        ]
+      ];
+
+      bot.editMessageText(cancelMessage, {
+        chat_id: query.message.chat.id,
+        message_id: query.message.message_id,
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: buttons }
+      });
+
+      // Notify admin
+      const adminMsg = `❌ **Order Cancelled by Customer**\n\n` +
+        `🧾 **Order ID:** #${orderId}\n` +
+        `👤 **Customer:** [${from.first_name}](tg://user?id=${from.id})\n` +
+        `📅 **Cancelled:** ${new Date().toLocaleString()}`;
+
+      notifyGroup(bot, adminMsg, { parse_mode: 'Markdown' });
+    });
+  });
+}
+
+export async function handleCopyAddress(bot, query) {
+  const { data } = query;
+  
+  if (!data.startsWith('copy_address_')) return;
+  
+  const address = data.replace('copy_address_', '');
+  
+  // Send the address as a separate message for easy copying
+  await bot.sendMessage(query.message.chat.id, 
+    `📋 **Payment Address**\n\n\`${address}\`\n\n*Tap to copy the address above*`,
+    { parse_mode: 'Markdown' }
+  );
+  
+  bot.answerCallbackQuery(query.id, { text: '📋 Address sent for easy copying!' });
+}
+
+function getStatusDescription(status) {
+  switch (status) {
+    case 'pending':
+      return `⏳ **Waiting for payment confirmation**\n` +
+             `• Send payment to the provided address\n` +
+             `• Click "I've Sent Payment" after sending\n` +
+             `• Our team will verify within 1 hour`;
+    case 'confirmed':
+      return `✅ **Payment confirmed - Processing delivery**\n` +
+             `• Your payment has been verified\n` +
+             `• Product delivery in progress\n` +
+             `• You'll receive your product shortly`;
+    case 'delivered':
+      return `🎉 **Order completed successfully!**\n` +
+             `• Your product has been delivered\n` +
+             `• Check your messages for the product\n` +
+             `• Thank you for your purchase!`;
+    case 'cancelled':
+      return `❌ **Order has been cancelled**\n` +
+             `• If you sent payment, contact support\n` +
+             `• Refunds processed within 24 hours`;
+    default:
+      return `❓ **Unknown status - Contact support**`;
   }
 }
