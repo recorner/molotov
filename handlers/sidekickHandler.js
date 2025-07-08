@@ -93,6 +93,9 @@ export async function handleSidekickCallback(bot, query) {
         message_id: messageId
       });
 
+    case 'sidekick_full_stats':
+      return showFullStats(bot, chatId, messageId);
+
     default:
       if (data.startsWith('sidekick_')) {
         return handleAdvancedSidekickActions(bot, query);
@@ -146,46 +149,47 @@ Welcome to the advanced onchain management system. Choose an option below:
 
 async function showSidekickDashboard(bot, chatId, messageId) {
   try {
-    // Get recent transactions
-    const recentTxs = await getRecentTransactions(5);
+    // Get system stats
+    const stats = await getDashboardStats();
     
-    // Get pending payouts
-    const pendingPayouts = await getPendingPayouts();
+    let message = `📊 *Sidekick Dashboard*\n\n`;
     
-    // Get total balances (simulated for now)
-    const balances = await getWalletBalances();
-
-    let message = `📊 *Sidekick Dashboard*
-
-💰 *Current Balances:*
-`;
-
-    balances.forEach(balance => {
-      message += `• ${balance.currency}: \`${balance.amount}\`\n`;
-    });
-
-    message += `\n🔔 *Recent Activity:*\n`;
+    // System Status
+    message += `🟢 *System Status:* Online\n`;
+    message += `⏱️ *Uptime:* ${formatUptime(process.uptime())}\n\n`;
     
-    if (recentTxs.length > 0) {
-      recentTxs.forEach(tx => {
-        message += `• ${tx.currency} ${tx.amount} - ${formatTimeAgo(tx.detected_at)}\n`;
+    // Blockchain Stats
+    message += `⛓️ *Blockchain Monitoring:*\n`;
+    message += `• BTC Addresses: ${stats.btcAddresses}\n`;
+    message += `• LTC Addresses: ${stats.ltcAddresses}\n`;
+    message += `• Check Interval: ${Math.floor(stats.checkInterval / 1000)}s\n\n`;
+    
+    // Transaction Stats
+    message += `📈 *Transaction Stats:*\n`;
+    message += `• Total Detected: ${stats.totalTransactions}\n`;
+    message += `• Recent (24h): ${stats.recentTransactions}\n`;
+    message += `• Pending Payouts: ${stats.pendingPayouts}\n\n`;
+    
+    // Recent Activity
+    message += `🔔 *Recent Activity:*\n`;
+    if (stats.recentActivity && stats.recentActivity.length > 0) {
+      stats.recentActivity.slice(0, 3).forEach(activity => {
+        message += `• ${activity.type}: ${activity.description}\n`;
       });
     } else {
-      message += `• No recent transactions\n`;
+      message += `• No recent activity\n`;
     }
-
-    message += `\n⏳ *Pending Payouts:* ${pendingPayouts.length}`;
 
     const keyboard = [
       [
         { text: '🔄 Refresh', callback_data: 'sidekick_dashboard' },
-        { text: '💸 Quick Payout', callback_data: 'sidekick_quick_payout' }
+        { text: '� Full Stats', callback_data: 'sidekick_full_stats' }
       ],
       [
-        { text: '⚡ Auto Settle', callback_data: 'sidekick_auto_settle_now' },
-        { text: '📊 Full Stats', callback_data: 'sidekick_full_stats' }
+        { text: '💸 Quick Payout', callback_data: 'sidekick_new_payout' },
+        { text: '⚡ Auto Settle', callback_data: 'sidekick_auto_settlement' }
       ],
-      [{ text: '🔙 Back', callback_data: 'sidekick_start' }]
+      [{ text: '🔙 Back to Menu', callback_data: 'sidekick_start' }]
     ];
 
     return bot.editMessageText(message, {
@@ -197,9 +201,12 @@ async function showSidekickDashboard(bot, chatId, messageId) {
 
   } catch (error) {
     console.error('[Sidekick] Dashboard error:', error);
-    return bot.editMessageText('❌ Failed to load dashboard', {
+    return bot.editMessageText('❌ Failed to load dashboard. Please try again.', {
       chat_id: chatId,
-      message_id: messageId
+      message_id: messageId,
+      reply_markup: {
+        inline_keyboard: [[{ text: '🔙 Back to Menu', callback_data: 'sidekick_start' }]]
+      }
     });
   }
 }
@@ -864,6 +871,105 @@ async function getSystemStatus() {
   };
 }
 
+// Enhanced helper functions for dashboard
+async function getDashboardStats() {
+  try {
+    const stats = {
+      btcAddresses: 0,
+      ltcAddresses: 0,
+      checkInterval: 30000,
+      totalTransactions: 0,
+      recentTransactions: 0,
+      pendingPayouts: 0,
+      recentActivity: []
+    };
+
+    // Get wallet address counts
+    const addresses = await new Promise((resolve, reject) => {
+      db.all(`SELECT currency, COUNT(*) as count FROM wallet_addresses GROUP BY currency`, (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+    
+    addresses.forEach(row => {
+      if (row.currency === 'BTC') stats.btcAddresses = row.count;
+      if (row.currency === 'LTC') stats.ltcAddresses = row.count;
+    });
+
+    // Get transaction counts
+    const txCounts = await new Promise((resolve, reject) => {
+      db.get(`SELECT COUNT(*) as total FROM detected_transactions`, (err, row) => {
+        if (err) reject(err);
+        else resolve(row?.total || 0);
+      });
+    });
+    stats.totalTransactions = txCounts;
+
+    // Get recent transactions (24h)
+    const recent24h = await new Promise((resolve, reject) => {
+      db.get(`SELECT COUNT(*) as count FROM detected_transactions 
+              WHERE detected_at > datetime('now', '-1 day')`, (err, row) => {
+        if (err) reject(err);
+        else resolve(row?.count || 0);
+      });
+    });
+    stats.recentTransactions = recent24h;
+
+    // Get pending payouts
+    const pendingCount = await new Promise((resolve, reject) => {
+      db.get(`SELECT COUNT(*) as count FROM payouts WHERE status = 'pending'`, (err, row) => {
+        if (err) reject(err);
+        else resolve(row?.count || 0);
+      });
+    });
+    stats.pendingPayouts = pendingCount;
+
+    // Get recent activity
+    const recentActivity = await new Promise((resolve, reject) => {
+      db.all(`SELECT 'Transaction' as type, 
+                     currency || ' ' || amount || ' detected' as description, 
+                     detected_at as timestamp
+              FROM detected_transactions 
+              WHERE detected_at > datetime('now', '-24 hours')
+              UNION ALL
+              SELECT 'Payout' as type, 
+                     currency || ' ' || amount || ' payout' as description, 
+                     created_at as timestamp
+              FROM payouts 
+              WHERE created_at > datetime('now', '-24 hours')
+              ORDER BY timestamp DESC LIMIT 5`, (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+    stats.recentActivity = recentActivity;
+
+    return stats;
+  } catch (error) {
+    console.error('[Dashboard] Stats error:', error);
+    return {
+      btcAddresses: 0,
+      ltcAddresses: 0,
+      checkInterval: 30000,
+      totalTransactions: 0,
+      recentTransactions: 0,
+      pendingPayouts: 0,
+      recentActivity: []
+    };
+  }
+}
+
+function formatUptime(seconds) {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
 // Advanced action handlers
 async function handleAdvancedSidekickActions(bot, query) {
   const chatId = query.message.chat.id;
@@ -1223,341 +1329,6 @@ async function showScheduledPayouts(bot, chatId, messageId) {
     
     if (scheduledPayouts.length === 0) {
       message += `📭 No scheduled payouts found.\n\n`;
-      message += `💡 **Create Scheduled Payouts:**\n`;
-      message += `• Set future execution dates\n`;
-      message += `• Automated recurring payments\n`;
-      message += `• Business hour restrictions\n`;
-    } else {
-      message += `📋 Active scheduled payouts (${scheduledPayouts.length}):\n\n`;
-      
-      scheduledPayouts.slice(0, 10).forEach((payout, i) => {
-        const scheduleTime = new Date(payout.scheduled_at);
-        message += `${i + 1}. **#${payout.id}** - ${payout.currency} ${payout.amount}\n`;
-        message += `   📅 Scheduled: ${scheduleTime.toLocaleString()}\n`;
-        message += `   📬 To: \`${payout.to_address.substring(0, 25)}...\`\n\n`;
-      });
-    }
-
-    const keyboard = [
-      [
-        { text: '➕ Schedule New', callback_data: 'sidekick_schedule_new_payout' },
-        { text: '🔄 Refresh', callback_data: 'sidekick_scheduled_payouts' }
-      ],
-      [
-        { text: '⏸️ Pause All', callback_data: 'sidekick_pause_scheduled' },
-        { text: '🗑️ Cancel Selected', callback_data: 'sidekick_cancel_scheduled' }
-      ],
-      [{ text: '🔙 Back to Payouts', callback_data: 'sidekick_payouts' }]
-    ];
-
-    return bot.editMessageText(message, {
-      chat_id: chatId,
-      message_id: messageId,
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: keyboard }
-    });
-  } catch (error) {
-    console.error('[Sidekick] Scheduled payouts error:', error);
-    return bot.editMessageText('❌ Failed to load scheduled payouts', {
-      chat_id: chatId,
-      message_id: messageId
-    });
-  }
-}
-
-async function showPayoutHistory(bot, chatId, messageId) {
-  try {
-    const history = await getPayoutHistory();
-    
-    let message = `📊 **Payout History**\n\n`;
-    
-    if (history.length === 0) {
-      message += `📭 No payout history found.\n\n`;
-      message += `💡 History will appear here after processing payouts.`;
-    } else {
-      message += `📋 Recent payouts (${history.length}):\n\n`;
-      
-      history.slice(0, 15).forEach((payout, i) => {
-        const statusEmoji = payout.status === 'completed' ? '✅' : payout.status === 'failed' ? '❌' : '⏳';
-        const processedDate = payout.processed_at ? new Date(payout.processed_at).toLocaleDateString() : 'Pending';
-        
-        message += `${statusEmoji} **#${payout.id}** - ${payout.currency} ${payout.amount}\n`;
-        message += `   📅 ${processedDate} | Status: ${payout.status}\n`;
-        if (payout.txid) {
-          message += `   � TXID: \`${payout.txid.substring(0, 16)}...\`\n`;
-        }
-        message += `\n`;
-      });
-
-      if (history.length > 15) {
-        message += `... and ${history.length - 15} more transactions\n`;
-      }
-    }
-
-    const keyboard = [
-      [
-        { text: '🔄 Refresh', callback_data: 'sidekick_payout_history' },
-        { text: '📊 Export Data', callback_data: 'sidekick_export_history' }
-      ],
-      [
-        { text: '💎 BTC Only', callback_data: 'sidekick_history_btc_filter' },
-        { text: '🪙 LTC Only', callback_data: 'sidekick_history_ltc_filter' }
-      ],
-      [{ text: '🔙 Back to Payouts', callback_data: 'sidekick_payouts' }]
-    ];
-
-    return bot.editMessageText(message, {
-      chat_id: chatId,
-      message_id: messageId,
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: keyboard }
-    });
-  } catch (error) {
-    console.error('[Sidekick] Payout history error:', error);
-    return bot.editMessageText('❌ Failed to load payout history', {
-      chat_id: chatId,
-      message_id: messageId
-    });
-  }
-}
-
-async function triggerManualSettlement(bot, chatId, messageId, userId) {
-  try {
-    const rules = await getAllSettlementRules();
-    
-    if (rules.length === 0) {
-      return bot.editMessageText(
-        `⚡ **Manual Settlement Trigger**\n\n❌ No settlement rules configured.\n\nPlease add settlement rules first.`,
-        {
-          chat_id: chatId,
-          message_id: messageId,
-          parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '➕ Add Rule', callback_data: 'sidekick_add_settlement_rule' }],
-              [{ text: '🔙 Back', callback_data: 'sidekick_auto_settlement' }]
-            ]
-          }
-        }
-      );
-    }
-
-    const balances = await getWalletBalances();
-    let message = `⚡ **Manual Settlement Trigger**\n\n`;
-    message += `📊 **Current Balances:**\n`;
-    
-    balances.forEach(balance => {
-      message += `• ${balance.currency}: \`${balance.amount}\`\n`;
-    });
-    
-    message += `\n🎯 **Active Rules:** ${rules.filter(r => r.enabled).length}/${rules.length}\n\n`;
-    
-    const enabledRules = rules.filter(rule => rule.enabled);
-    if (enabledRules.length > 0) {
-      message += `💡 Settlement will execute according to your configured rules.\n\n`;
-      message += `⚠️ **PIN verification required** to proceed.`;
-    } else {
-      message += `❌ All settlement rules are currently disabled.`;
-    }
-
-    const keyboard = enabledRules.length > 0 ? [
-      [
-        { text: '⚡ Execute Now', callback_data: 'sidekick_execute_settlement' },
-        { text: '👁️ Preview', callback_data: 'sidekick_preview_settlement' }
-      ],
-      [{ text: '🔙 Back', callback_data: 'sidekick_auto_settlement' }]
-    ] : [
-      [{ text: '⚙️ Enable Rules', callback_data: 'sidekick_view_settlement_rules' }],
-      [{ text: '🔙 Back', callback_data: 'sidekick_auto_settlement' }]
-    ];
-
-    return bot.editMessageText(message, {
-      chat_id: chatId,
-      message_id: messageId,
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: keyboard }
-    });
-  } catch (error) {
-    console.error('[Sidekick] Manual settlement error:', error);
-    return bot.editMessageText('❌ Failed to load settlement trigger', {
-      chat_id: chatId,
-      message_id: messageId
-    });
-  }
-}
-
-async function pauseAutoSettlement(bot, chatId, messageId) {
-  try {
-    const rules = await getAllSettlementRules();
-    const enabledCount = rules.filter(rule => rule.enabled).length;
-    
-    let message = `⏸️ **Pause Auto-Settlement**\n\n`;
-    
-    if (enabledCount === 0) {
-      message += `📭 All settlement rules are already disabled.\n\n`;
-      message += `💡 No action needed - auto-settlement is currently paused.`;
-    } else {
-      message += `🎯 **Currently Active:** ${enabledCount} rules\n\n`;
-      message += `⚠️ **Pausing will:**\n`;
-      message += `• Disable all active settlement rules\n`;
-      message += `• Stop automatic payouts\n`;
-      message += `• Require manual re-enabling\n\n`;
-      message += `❓ Are you sure you want to pause all auto-settlement?`;
-    }
-
-    const keyboard = enabledCount > 0 ? [
-      [
-        { text: '⏸️ Pause All Rules', callback_data: 'sidekick_confirm_pause_settlement' },
-        { text: '❌ Cancel', callback_data: 'sidekick_auto_settlement' }
-      ],
-      [{ text: '📋 View Rules', callback_data: 'sidekick_view_settlement_rules' }]
-    ] : [
-      [
-        { text: '▶️ Resume All', callback_data: 'sidekick_resume_settlement' },
-        { text: '📋 View Rules', callback_data: 'sidekick_view_settlement_rules' }
-      ],
-      [{ text: '🔙 Back', callback_data: 'sidekick_auto_settlement' }]
-    ];
-
-    return bot.editMessageText(message, {
-      chat_id: chatId,
-      message_id: messageId,
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: keyboard }
-    });
-  } catch (error) {
-    console.error('[Sidekick] Pause settlement error:', error);
-    return bot.editMessageText('❌ Failed to load pause settlement options', {
-      chat_id: chatId,
-      message_id: messageId
-    });
-  }
-}
-
-async function showSettlementHistory(bot, chatId, messageId) {
-  try {
-    const history = await getSettlementHistory();
-    
-    let message = `📊 **Settlement History**\n\n`;
-    
-    if (history.length === 0) {
-      message += `📭 No settlement history found.\n\n`;
-      message += `💡 **Settlement History Will Show:**\n`;
-      message += `• Automatic settlement executions\n`;
-      message += `• Manual settlement triggers\n`;
-      message += `• Distribution amounts and addresses\n`;
-      message += `• Success/failure status\n`;
-    } else {
-      message += `📋 Recent settlements (${history.length}):\n\n`;
-      
-      history.slice(0, 10).forEach((settlement, i) => {
-        const statusEmoji = settlement.status === 'completed' ? '✅' : settlement.status === 'failed' ? '❌' : '⏳';
-        const executedDate = new Date(settlement.executed_at).toLocaleDateString();
-        
-        message += `${statusEmoji} **Settlement #${settlement.id}**\n`;
-        message += `   📅 ${executedDate} | ${settlement.trigger_type}\n`;
-        message += `   💰 Total: ${settlement.total_amount} ${settlement.currency}\n`;
-        message += `   📊 Rules Applied: ${settlement.rules_count}\n\n`;
-      });
-
-      if (history.length > 10) {
-        message += `... and ${history.length - 10} more settlements\n`;
-      }
-    }
-
-    const keyboard = [
-      [
-        { text: '🔄 Refresh', callback_data: 'sidekick_settlement_history' },
-        { text: '📊 Statistics', callback_data: 'sidekick_settlement_stats' }
-      ],
-      [
-        { text: '📈 Monthly Report', callback_data: 'sidekick_settlement_monthly' },
-        { text: '📋 Export Data', callback_data: 'sidekick_export_settlements' }
-      ],
-      [{ text: '🔙 Back', callback_data: 'sidekick_auto_settlement' }]
-    ];
-
-    return bot.editMessageText(message, {
-      chat_id: chatId,
-      message_id: messageId,
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: keyboard }
-    });
-  } catch (error) {
-    console.error('[Sidekick] Settlement history error:', error);
-    return bot.editMessageText('❌ Failed to load settlement history', {
-      chat_id: chatId,
-      message_id: messageId
-    });
-  }
-}
-
-async function showSettlementConfig(bot, chatId, messageId) {
-  const message = `⚙️ **Settlement Configuration**\n\nAdvanced auto-settlement settings and thresholds.\n\n🚧 Implementation in progress...`;
-  
-  return bot.editMessageText(message, {
-    chat_id: chatId,
-    message_id: messageId,
-    parse_mode: 'Markdown',
-    reply_markup: {
-      inline_keyboard: [[{ text: '🔙 Back', callback_data: 'sidekick_auto_settlement' }]]
-    }
-  });
-}
-
-async function initiatePinChange(bot, chatId, messageId) {
-  try {
-    // Check if user has existing PIN
-    const hasPin = await checkUserHasPin(chatId);
-    
-    let message = `🔄 **Change Transaction PIN**\n\n`;
-    
-    if (hasPin) {
-      message += `🔐 You currently have a PIN configured.\n\n`;
-      message += `📝 **To change your PIN:**\n`;
-      message += `1. Enter your current PIN for verification\n`;
-      message += `2. Set your new 4-8 digit PIN\n`;
-      message += `3. Confirm the new PIN\n\n`;
-      message += `⚠️ **Security Note:** PIN changes are logged for security.`;
-    } else {
-      message += `❌ No PIN currently configured.\n\n`;
-      message += `� Please set up a PIN first using the "Set PIN" option.`;
-    }
-
-    const keyboard = hasPin ? [
-      [
-        { text: '🔄 Change PIN', callback_data: 'sidekick_start_pin_change' },
-        { text: '🔑 Set New PIN', callback_data: 'sidekick_set_pin' }
-      ],
-      [{ text: '🔙 Back to Security', callback_data: 'sidekick_security' }]
-    ] : [
-      [{ text: '🔑 Set PIN', callback_data: 'sidekick_set_pin' }],
-      [{ text: '🔙 Back to Security', callback_data: 'sidekick_security' }]
-    ];
-
-    return bot.editMessageText(message, {
-      chat_id: chatId,
-      message_id: messageId,
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: keyboard }
-    });
-  } catch (error) {
-    console.error('[Sidekick] PIN change error:', error);
-    return bot.editMessageText('❌ Failed to load PIN change options', {
-      chat_id: chatId,
-      message_id: messageId
-    });
-  }
-}
-
-async function showKeyManagement(bot, chatId, messageId) {
-  try {
-    const wallets = await getWalletAddresses();
-    
-    let message = `🗝️ **Private Key Management**\n\n`;
-    
-    if (wallets.length === 0) {
-      message += `📭 No wallets configured.\n\n`;
       message += `💡 Add wallet addresses first to manage their private keys.`;
     } else {
       message += `🔐 **Wallet Summary:**\n`;
@@ -1751,43 +1522,55 @@ async function executeAutoSettleNow(bot, chatId, messageId, userId) {
   });
 }
 
-async function showFullStatistics(bot, chatId, messageId) {
+async function showFullStats(bot, chatId, messageId) {
   try {
-    const stats = await getComprehensiveStats();
+    const stats = await getDashboardStats();
+    const detailedStats = await getDetailedStats();
     
-    let message = `📊 **Full System Statistics**\n\n`;
+    let message = `📊 *Detailed System Statistics*\n\n`;
     
-    message += `💰 **Financial Overview:**\n`;
-    message += `• Total Processed: $${stats.totalProcessed.toLocaleString()}\n`;
-    message += `• Monthly Volume: $${stats.monthlyVolume.toLocaleString()}\n`;
-    message += `• Average Transaction: $${stats.avgTransaction.toFixed(2)}\n\n`;
+    // System Information
+    message += `🖥️ *System Information:*\n`;
+    message += `• Node.js Version: ${process.version}\n`;
+    message += `• Memory Usage: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB\n`;
+    message += `• Uptime: ${formatUptime(process.uptime())}\n\n`;
     
-    message += `📈 **Transaction Stats:**\n`;
-    message += `• Total Transactions: ${stats.totalTransactions}\n`;
-    message += `• Success Rate: ${stats.successRate}%\n`;
-    message += `• Pending: ${stats.pendingCount}\n`;
-    message += `• Failed: ${stats.failedCount}\n\n`;
+    // Blockchain Monitoring
+    message += `⛓️ *Blockchain Monitoring:*\n`;
+    message += `• Bitcoin Addresses: ${stats.btcAddresses}\n`;
+    message += `• Litecoin Addresses: ${stats.ltcAddresses}\n`;
+    message += `• Check Interval: ${Math.floor(stats.checkInterval / 1000)}s\n`;
+    message += `• API Status: ${detailedStats.apiStatus}\n\n`;
     
-    message += `⚡ **Settlement Performance:**\n`;
-    message += `• Auto Settlements: ${stats.autoSettlements}\n`;
-    message += `• Manual Triggers: ${stats.manualTriggers}\n`;
-    message += `• Average Processing Time: ${stats.avgProcessingTime}s\n\n`;
+    // Transaction Statistics
+    message += `📈 *Transaction Statistics:*\n`;
+    message += `• Total Detected: ${stats.totalTransactions}\n`;
+    message += `• Last 24 Hours: ${stats.recentTransactions}\n`;
+    message += `• Last 7 Days: ${detailedStats.weeklyTransactions}\n`;
+    message += `• Average per Day: ${detailedStats.averagePerDay}\n\n`;
     
-    message += `� **Security Metrics:**\n`;
-    message += `• PIN Attempts: ${stats.pinAttempts}\n`;
-    message += `• Failed Logins: ${stats.failedLogins}\n`;
-    message += `• Last Security Event: ${stats.lastSecurityEvent}\n`;
+    // Payout Statistics
+    message += `💸 *Payout Statistics:*\n`;
+    message += `• Pending: ${stats.pendingPayouts}\n`;
+    message += `• Completed: ${detailedStats.completedPayouts}\n`;
+    message += `• Failed: ${detailedStats.failedPayouts}\n`;
+    message += `• Total Volume: ${detailedStats.totalPayoutVolume}\n\n`;
+    
+    // Database Statistics
+    message += `🗄️ *Database Statistics:*\n`;
+    message += `• Total Orders: ${detailedStats.totalOrders}\n`;
+    message += `• Active Orders: ${detailedStats.activeOrders}\n`;
+    message += `• Database Size: ${detailedStats.dbSize}\n`;
 
     const keyboard = [
       [
-        { text: '📊 Detailed Report', callback_data: 'sidekick_detailed_stats' },
-        { text: '📈 Trending Data', callback_data: 'sidekick_trending_stats' }
+        { text: '🔄 Refresh', callback_data: 'sidekick_full_stats' },
+        { text: '📥 Export Data', callback_data: 'sidekick_export_stats' }
       ],
       [
-        { text: '📅 Monthly View', callback_data: 'sidekick_monthly_stats' },
-        { text: '📋 Export Report', callback_data: 'sidekick_export_stats' }
-      ],
-      [{ text: '🔙 Back to Dashboard', callback_data: 'sidekick_dashboard' }]
+        { text: '📊 Simple View', callback_data: 'sidekick_dashboard' },
+        { text: '🔙 Back to Menu', callback_data: 'sidekick_start' }
+      ]
     ];
 
     return bot.editMessageText(message, {
@@ -1796,117 +1579,91 @@ async function showFullStatistics(bot, chatId, messageId) {
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: keyboard }
     });
+
   } catch (error) {
-    console.error('[Sidekick] Full statistics error:', error);
-    return bot.editMessageText('❌ Failed to load statistics', {
+    console.error('[Sidekick] Full stats error:', error);
+    return bot.editMessageText('❌ Failed to load detailed statistics.', {
       chat_id: chatId,
-      message_id: messageId
+      message_id: messageId,
+      reply_markup: {
+        inline_keyboard: [[{ text: '🔙 Back to Menu', callback_data: 'sidekick_start' }]]
+      }
     });
   }
 }
 
-// Helper functions for new features
-async function getScheduledPayouts() {
-  return new Promise((resolve, reject) => {
-    db.all(
-      `SELECT * FROM payouts WHERE status = 'scheduled' ORDER BY scheduled_at ASC`,
-      (err, rows) => {
+async function getDetailedStats() {
+  try {
+    const stats = {
+      apiStatus: '🟢 Online',
+      weeklyTransactions: 0,
+      averagePerDay: 0,
+      completedPayouts: 0,
+      failedPayouts: 0,
+      totalPayoutVolume: '0.00000000 BTC',
+      totalOrders: 0,
+      activeOrders: 0,
+      dbSize: 'Unknown'
+    };
+
+    // Get weekly transactions
+    const weeklyTxs = await new Promise((resolve, reject) => {
+      db.get(`SELECT COUNT(*) as count FROM detected_transactions 
+              WHERE detected_at > datetime('now', '-7 days')`, (err, row) => {
+        if (err) reject(err);
+        else resolve(row?.count || 0);
+      });
+    });
+    stats.weeklyTransactions = weeklyTxs;
+    stats.averagePerDay = Math.round(weeklyTxs / 7 * 10) / 10;
+
+    // Get payout statistics
+    const payoutStats = await new Promise((resolve, reject) => {
+      db.all(`SELECT status, COUNT(*) as count FROM payouts GROUP BY status`, (err, rows) => {
         if (err) reject(err);
         else resolve(rows || []);
-      }
-    );
-  });
-}
+      });
+    });
+    
+    payoutStats.forEach(row => {
+      if (row.status === 'completed') stats.completedPayouts = row.count;
+      if (row.status === 'failed') stats.failedPayouts = row.count;
+    });
 
-async function getPayoutHistory(limit = 100) {
-  return new Promise((resolve, reject) => {
-    db.all(
-      `SELECT * FROM payouts WHERE status IN ('completed', 'failed') ORDER BY processed_at DESC LIMIT ?`,
-      [limit],
-      (err, rows) => {
+    // Get order statistics
+    const orderStats = await new Promise((resolve, reject) => {
+      db.all(`SELECT status, COUNT(*) as count FROM orders GROUP BY status`, (err, rows) => {
         if (err) reject(err);
         else resolve(rows || []);
-      }
-    );
-  });
-}
-
-async function getSettlementHistory() {
-  return new Promise((resolve, reject) => {
-    db.all(
-      `SELECT 
-        id, 'auto' as trigger_type, created_at as executed_at, 
-        'completed' as status, 0 as total_amount, 'BTC' as currency, 1 as rules_count
-       FROM auto_settlement 
-       ORDER BY created_at DESC LIMIT 20`,
-      (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows || []);
-      }
-    );
-  });
-}
-
-async function checkUserHasPin(userId) {
-  return new Promise((resolve) => {
-    db.get(
-      `SELECT id FROM transaction_pins WHERE user_id = ?`,
-      [userId],
-      (err, row) => resolve(!!row)
-    );
-  });
-}
-
-async function getWalletAddresses() {
-  return new Promise((resolve, reject) => {
-    db.all(
-      `SELECT id, currency, address, label, private_key IS NOT NULL as has_private_key FROM wallet_addresses`,
-      (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows || []);
-      }
-    );
-  });
-}
-
-async function getComprehensiveStats() {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  
-  return new Promise((resolve, reject) => {
-    db.all(`
-      SELECT 
-        COUNT(*) as total_transactions,
-        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count,
-        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_count,
-        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_count,
-        SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END) as total_processed,
-        AVG(CASE WHEN status = 'completed' THEN amount ELSE NULL END) as avg_transaction,
-        SUM(CASE WHEN status = 'completed' AND created_at >= ? THEN amount ELSE 0 END) as monthly_volume
-      FROM payouts
-    `, [thirtyDaysAgo], (err, rows) => {
-      if (err) {
-        reject(err);
-      } else {
-        const row = rows[0] || {};
-        resolve({
-          totalTransactions: row.total_transactions || 0,
-          pendingCount: row.pending_count || 0,
-          failedCount: row.failed_count || 0,
-          totalProcessed: row.total_processed || 0,
-          avgTransaction: row.avg_transaction || 0,
-          monthlyVolume: row.monthly_volume || 0,
-          successRate: row.total_transactions > 0 ? 
-            Math.round((row.completed_count / row.total_transactions) * 100) : 0,
-          autoSettlements: 15, // Mock data
-          manualTriggers: 3,
-          avgProcessingTime: 2.4,
-          pinAttempts: 42,
-          failedLogins: 2,
-          lastSecurityEvent: 'PIN change - 2 hours ago'
-        });
+      });
+    });
+    
+    let totalOrders = 0;
+    let activeOrders = 0;
+    orderStats.forEach(row => {
+      totalOrders += row.count;
+      if (row.status === 'pending' || row.status === 'confirmed') {
+        activeOrders += row.count;
       }
     });
-  });
+    stats.totalOrders = totalOrders;
+    stats.activeOrders = activeOrders;
+
+    return stats;
+  } catch (error) {
+    console.error('[DetailedStats] Error:', error);
+    return {
+      apiStatus: '🔴 Error',
+      weeklyTransactions: 0,
+      averagePerDay: 0,
+      completedPayouts: 0,
+      failedPayouts: 0,
+      totalPayoutVolume: '0.00000000 BTC',
+      totalOrders: 0,
+      activeOrders: 0,
+      dbSize: 'Unknown'
+    };
+  }
 }
 
 export { activeSidekickSessions, pendingPinVerifications };

@@ -1,0 +1,30 @@
+# Blockchain API Configuration - Production Ready
+# ==================================================
+
+# === BITCOIN APIs ===
+# Blockstream API (Bitcoin) - Free, no API key needed
+BLOCKSTREAM_API=https://blockstream.info/api
+
+# Mempool Space API (Bitcoin) - Free, no API key needed  
+MEMPOOL_API=https://mempool.space/api
+
+# Blockchair API - Free tier: 100 req/day, Paid: $99/month for unlimited
+BLOCKCHAIR_API=https://api.blockchair.com/bitcoin
+BLOCKCHAIR_API_KEY=
+
+# === LITECOIN APIs ===
+BLOCKCHAIR_LTC_API=https://api.blockchair.com/litecoin
+
+# BlockCypher API - Free: 200 req/hour, Paid: $85/month for 10k req/hour
+BLOCKCYPHER_API=https://api.blockcypher.com/v1
+BLOCKCYPHER_API_KEY=
+
+# === MONITORING SETTINGS ===
+# How often to check for new transactions (milliseconds)
+BLOCKCHAIN_CHECK_INTERVAL=30000
+
+# === INSTRUCTIONS ===
+# 1. Get Blockchair API key (optional for free tier): https://blockchair.com/api
+# 2. Get BlockCypher API key: https://accounts.blockcypher.com/
+# 3. Copy this file to .env and fill in your API keys
+# 4. Keep .env file secure and never commit it to git
