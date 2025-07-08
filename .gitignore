@@ -1,3 +1,23 @@
+# Environment and sensitive files
 .env
+encryption.key
+bot_state.encrypted
+
+# Node modules
 node_modules/
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp

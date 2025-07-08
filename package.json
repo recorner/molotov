@@ -1,19 +1,29 @@
 {
   "name": "molotov",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
-  "main": "index.js",
+  "main": "bot.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node bot.js",
+    "dev": "node --watch bot.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "migrate": "node -e \"import('./utils/migrations.js').then(m => m.MigrationManager.runMigrationsIfNeeded())\"",
+    "backup": "node scripts/backup.js",
+    "health": "node scripts/health-check.js"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["telegram", "bot", "cryptocurrency", "bitcoin", "litecoin", "payments"],
+  "author": "Molotov Team",
   "license": "ISC",
-  "description": "",
+  "description": "Production-grade Telegram bot with advanced cryptocurrency transaction management (Sidekick System)",
   "dependencies": {
+    "axios": "^1.10.0",
+    "bitcoinjs-lib": "^6.1.7",
     "dotenv": "^16.5.0",
     "node-cron": "^4.1.1",
     "node-telegram-bot-api": "^0.66.0",
     "sqlite3": "^5.1.7"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

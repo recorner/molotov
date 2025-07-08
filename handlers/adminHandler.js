@@ -135,6 +135,119 @@ export function handleAdminCallback(bot, query) {
 
   // === Placeholder for other panels ===
   if (data.startsWith('panel_')) {
-    return bot.answerCallbackQuery(query.id, { text: '🛠 Coming soon.' });
+    const panelType = data.split('_')[1];
+    
+    switch (panelType) {
+      case 'stats':
+        return showStatsPanel(bot, chatId, messageId);
+      case 'users':
+        return showUsersPanel(bot, chatId, messageId);
+      case 'orders':
+        return showOrdersPanel(bot, chatId, messageId);
+      case 'system':
+        return showSystemPanel(bot, chatId, messageId);
+      default:
+        return bot.editMessageText(`⚙️ **${panelType.toUpperCase()} Panel**\n\nPanel configuration and management options.`, {
+          chat_id: chatId,
+          message_id: messageId,
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [[{ text: '🔙 Back to Admin', callback_data: 'cocktail_back' }]]
+          }
+        });
+    }
   }
+}
+
+// Additional panel functions
+async function showStatsPanel(bot, chatId, messageId) {
+  const message = `📊 **Statistics Panel**\n\nView comprehensive bot statistics and analytics.\n\n🚧 Advanced statistics implementation in progress...`;
+  
+  const keyboard = [
+    [
+      { text: '📈 Revenue Stats', callback_data: 'stats_revenue' },
+      { text: '👥 User Stats', callback_data: 'stats_users' }
+    ],
+    [
+      { text: '📦 Product Stats', callback_data: 'stats_products' },
+      { text: '💸 Payment Stats', callback_data: 'stats_payments' }
+    ],
+    [{ text: '🔙 Back to Admin', callback_data: 'cocktail_back' }]
+  ];
+
+  return bot.editMessageText(message, {
+    chat_id: chatId,
+    message_id: messageId,
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: keyboard }
+  });
+}
+
+async function showUsersPanel(bot, chatId, messageId) {
+  const message = `👥 **User Management Panel**\n\nManage users, permissions, and user analytics.\n\n🚧 User management implementation in progress...`;
+  
+  const keyboard = [
+    [
+      { text: '👤 View Users', callback_data: 'users_list' },
+      { text: '🚫 Ban User', callback_data: 'users_ban' }
+    ],
+    [
+      { text: '📊 User Analytics', callback_data: 'users_analytics' },
+      { text: '💬 Send Message', callback_data: 'users_message' }
+    ],
+    [{ text: '🔙 Back to Admin', callback_data: 'cocktail_back' }]
+  ];
+
+  return bot.editMessageText(message, {
+    chat_id: chatId,
+    message_id: messageId,
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: keyboard }
+  });
+}
+
+async function showOrdersPanel(bot, chatId, messageId) {
+  const message = `📦 **Order Management Panel**\n\nManage orders, deliveries, and order analytics.\n\n🚧 Order management implementation in progress...`;
+  
+  const keyboard = [
+    [
+      { text: '� View Orders', callback_data: 'orders_list' },
+      { text: '✅ Complete Order', callback_data: 'orders_complete' }
+    ],
+    [
+      { text: '❌ Cancel Order', callback_data: 'orders_cancel' },
+      { text: '📊 Order Analytics', callback_data: 'orders_analytics' }
+    ],
+    [{ text: '🔙 Back to Admin', callback_data: 'cocktail_back' }]
+  ];
+
+  return bot.editMessageText(message, {
+    chat_id: chatId,
+    message_id: messageId,
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: keyboard }
+  });
+}
+
+async function showSystemPanel(bot, chatId, messageId) {
+  const message = `⚙️ **System Management Panel**\n\nSystem configuration, maintenance, and monitoring.\n\n🚧 System management implementation in progress...`;
+  
+  const keyboard = [
+    [
+      { text: '📊 System Status', callback_data: 'system_status' },
+      { text: '🔧 Maintenance', callback_data: 'system_maintenance' }
+    ],
+    [
+      { text: '📝 Logs', callback_data: 'system_logs' },
+      { text: '🔄 Restart Bot', callback_data: 'system_restart' }
+    ],
+    [{ text: '🔙 Back to Admin', callback_data: 'cocktail_back' }]
+  ];
+
+  return bot.editMessageText(message, {
+    chat_id: chatId,
+    message_id: messageId,
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: keyboard }
+  });
 }

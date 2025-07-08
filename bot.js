@@ -66,6 +66,9 @@ async function initializeBot() {
     const transactionManager = new TransactionManager(bot);
     const pinManager = new PinManager();
     
+    // Make blockchain monitor globally available for Sidekick
+    global.blockchainMonitor = blockchainMonitor;
+    
     // Initialize Sidekick Input Handler properly
     sidekickInputHandler = initializeSidekickInputHandler(bot);
     

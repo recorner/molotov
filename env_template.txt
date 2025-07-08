@@ -1,30 +1,38 @@
-# Blockchain API Configuration - Production Ready
-# ==================================================
+# Blockchain API Configuration - Production Ready (FREE APIS ONLY)
+# ==================================================================
 
 # === BITCOIN APIs ===
-# Blockstream API (Bitcoin) - Free, no API key needed
+# Blockstream API (Bitcoin) - Free, no API key needed, most reliable
 BLOCKSTREAM_API=https://blockstream.info/api
 
-# Mempool Space API (Bitcoin) - Free, no API key needed  
+# Mempool Space API (Bitcoin) - Free, no API key needed
 MEMPOOL_API=https://mempool.space/api
 
-# Blockchair API - Free tier: 100 req/day, Paid: $99/month for unlimited
-BLOCKCHAIR_API=https://api.blockchair.com/bitcoin
-BLOCKCHAIR_API_KEY=
-
 # === LITECOIN APIs ===
-BLOCKCHAIR_LTC_API=https://api.blockchair.com/litecoin
-
 # BlockCypher API - Free: 200 req/hour, Paid: $85/month for 10k req/hour
 BLOCKCYPHER_API=https://api.blockcypher.com/v1
 BLOCKCYPHER_API_KEY=
+
+# SoChain API (Litecoin) - Free, no API key needed
+SOCHAIN_API=https://chain.so/api/v2
+
+# === PRICE APIs ===
+# CoinGecko API - Free, no API key needed
+COINGECKO_API=https://api.coingecko.com/api/v3
 
 # === MONITORING SETTINGS ===
 # How often to check for new transactions (milliseconds)
 BLOCKCHAIN_CHECK_INTERVAL=30000
 
 # === INSTRUCTIONS ===
-# 1. Get Blockchair API key (optional for free tier): https://blockchair.com/api
-# 2. Get BlockCypher API key: https://accounts.blockcypher.com/
-# 3. Copy this file to .env and fill in your API keys
-# 4. Keep .env file secure and never commit it to git
+# 1. Get BlockCypher API key (optional for free tier): https://accounts.blockcypher.com/
+# 2. Copy this file to .env and fill in your API keys if desired
+# 3. Keep .env file secure and never commit it to git
+# 4. All APIs work without keys on free tiers with rate limits
+
+# === FREE TIER LIMITS ===
+# Blockstream.info: No limits (community funded)
+# Mempool.space: No limits (community funded)  
+# BlockCypher: 200 requests/hour without API key
+# SoChain: 300 requests/minute without API key
+# CoinGecko: 50 calls/minute without API key

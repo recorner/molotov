@@ -96,6 +96,21 @@ export async function handleSidekickCallback(bot, query) {
     case 'sidekick_full_stats':
       return showFullStats(bot, chatId, messageId);
 
+    case 'sidekick_detailed_balances':
+      return showDetailedBalances(bot, chatId, messageId);
+
+    case 'sidekick_balance_BTC':
+      return showSpecificBalance(bot, chatId, messageId, 'BTC');
+
+    case 'sidekick_balance_LTC':
+      return showSpecificBalance(bot, chatId, messageId, 'LTC');
+
+    case 'sidekick_price_charts':
+      return showPriceCharts(bot, chatId, messageId);
+
+    case 'sidekick_exchange_rates':
+      return showExchangeRates(bot, chatId, messageId);
+
     default:
       if (data.startsWith('sidekick_')) {
         return handleAdvancedSidekickActions(bot, query);
@@ -799,20 +814,76 @@ async function getPendingPayouts() {
 }
 
 async function getWalletBalances() {
-  // In a real implementation, this would query actual blockchain APIs
-  // For now, return simulated data
-  return [
-    { currency: 'BTC', amount: '0.05432100', usdValue: '2156.34' },
-    { currency: 'LTC', amount: '1.23456789', usdValue: '89.12' }
-  ];
+  try {
+    // Get blockchain monitor instance
+    const blockchainMonitor = global.blockchainMonitor;
+    
+    if (!blockchainMonitor) {
+      throw new Error('Blockchain monitor not available');
+    }
+    
+    // Get real balances from blockchain APIs
+    const totalBalances = await blockchainMonitor.getTotalBalances();
+    const prices = await blockchainMonitor.getCryptoPrices();
+    
+    const balances = [];
+    
+    if (totalBalances.BTC > 0) {
+      const usdValue = (totalBalances.BTC * prices.BTC).toFixed(2);
+      balances.push({
+        currency: 'BTC',
+        amount: totalBalances.BTC.toFixed(8),
+        usdValue: usdValue
+      });
+    }
+    
+    if (totalBalances.LTC > 0) {
+      const usdValue = (totalBalances.LTC * prices.LTC).toFixed(2);
+      balances.push({
+        currency: 'LTC',
+        amount: totalBalances.LTC.toFixed(8),
+        usdValue: usdValue
+      });
+    }
+    
+    // If no balances found, show zero balances
+    if (balances.length === 0) {
+      balances.push(
+        { currency: 'BTC', amount: '0.00000000', usdValue: '0.00' },
+        { currency: 'LTC', amount: '0.00000000', usdValue: '0.00' }
+      );
+    }
+    
+    return balances;
+  } catch (error) {
+    console.error('[Sidekick] Failed to get real wallet balances:', error);
+    // Return default empty balances on error
+    return [
+      { currency: 'BTC', amount: '0.00000000', usdValue: '0.00' },
+      { currency: 'LTC', amount: '0.00000000', usdValue: '0.00' }
+    ];
+  }
 }
 
 async function getCryptoPrices() {
-  // In production, integrate with CoinGecko, CoinMarketCap, or similar
-  return {
-    BTC: 43500 + (Math.random() * 1000 - 500),
-    LTC: 72 + (Math.random() * 10 - 5)
-  };
+  try {
+    const blockchainMonitor = global.blockchainMonitor;
+    if (blockchainMonitor) {
+      return await blockchainMonitor.getCryptoPrices();
+    }
+    
+    // Fallback to direct API call
+    const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,litecoin&vs_currencies=usd');
+    const data = await response.json();
+    
+    return {
+      BTC: data.bitcoin?.usd || 0,
+      LTC: data.litecoin?.usd || 0
+    };
+  } catch (error) {
+    console.error('[Sidekick] Failed to get crypto prices:', error);
+    return { BTC: 0, LTC: 0 };
+  }
 }
 
 async function getCryptoPrice(currency) {
@@ -821,9 +892,18 @@ async function getCryptoPrice(currency) {
 }
 
 async function getCurrencyBalance(currency) {
-  // In production, query actual blockchain APIs
-  const balances = { BTC: 0.05432100, LTC: 1.23456789 };
-  return balances[currency] || 0;
+  try {
+    const blockchainMonitor = global.blockchainMonitor;
+    if (!blockchainMonitor) {
+      return 0;
+    }
+    
+    const totalBalances = await blockchainMonitor.getTotalBalances();
+    return totalBalances[currency] || 0;
+  } catch (error) {
+    console.error(`[Sidekick] Failed to get ${currency} balance:`, error);
+    return 0;
+  }
 }
 
 async function getExchangeRates() {
@@ -874,6 +954,8 @@ async function getSystemStatus() {
 // Enhanced helper functions for dashboard
 async function getDashboardStats() {
   try {
+    const blockchainMonitor = global.blockchainMonitor;
+    
     const stats = {
       btcAddresses: 0,
       ltcAddresses: 0,
@@ -884,20 +966,27 @@ async function getDashboardStats() {
       recentActivity: []
     };
 
-    // Get wallet address counts
-    const addresses = await new Promise((resolve, reject) => {
-      db.all(`SELECT currency, COUNT(*) as count FROM wallet_addresses GROUP BY currency`, (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows || []);
+    // Get real address counts from blockchain monitor
+    if (blockchainMonitor) {
+      stats.btcAddresses = blockchainMonitor.btcAddresses.size;
+      stats.ltcAddresses = blockchainMonitor.ltcAddresses.size;
+      stats.checkInterval = blockchainMonitor.checkInterval;
+    } else {
+      // Fallback to database query
+      const addresses = await new Promise((resolve, reject) => {
+        db.all(`SELECT currency, COUNT(*) as count FROM wallet_addresses GROUP BY currency`, (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        });
       });
-    });
-    
-    addresses.forEach(row => {
-      if (row.currency === 'BTC') stats.btcAddresses = row.count;
-      if (row.currency === 'LTC') stats.ltcAddresses = row.count;
-    });
+      
+      addresses.forEach(row => {
+        if (row.currency === 'BTC') stats.btcAddresses = row.count;
+        if (row.currency === 'LTC') stats.ltcAddresses = row.count;
+      });
+    }
 
-    // Get transaction counts
+    // Get real transaction counts from database
     const txCounts = await new Promise((resolve, reject) => {
       db.get(`SELECT COUNT(*) as total FROM detected_transactions`, (err, row) => {
         if (err) reject(err);
@@ -1093,41 +1182,50 @@ Please wait while we fetch the latest balance information from the blockchain.`;
       parse_mode: 'Markdown'
     });
 
-    // Simulate balance refresh delay
-    setTimeout(async () => {
-      const balances = await getWalletBalances();
-      
-      let refreshedMessage = `✅ *Balances Refreshed*
+    // Fetch real blockchain balances
+    const blockchainMonitor = global.blockchainMonitor;
+    
+    let balances;
+    if (blockchainMonitor) {
+      // Force refresh balances from blockchain
+      balances = await getWalletBalances();
+    } else {
+      balances = await getWalletBalances();
+    }
+    
+    let refreshedMessage = `✅ *Balances Refreshed*
 
 *Updated Holdings:*
 `;
 
-      balances.forEach(balance => {
-        refreshedMessage += `💱 ${balance.currency}: \`${balance.amount}\`\n`;
-        refreshedMessage += `   USD: ~$${balance.usdValue || '0.00'}\n\n`;
-      });
+    balances.forEach(balance => {
+      refreshedMessage += `💱 ${balance.currency}: \`${balance.amount}\`\n`;
+      refreshedMessage += `   USD: ~$${balance.usdValue || '0.00'}\n\n`;
+    });
 
-      refreshedMessage += `*Last Updated:* ${new Date().toLocaleString()}`;
+    refreshedMessage += `*Last Updated:* ${new Date().toLocaleString()}`;
 
-      const keyboard = [
-        [{ text: '🔄 Refresh Again', callback_data: 'sidekick_refresh_balances' }],
-        [{ text: '📊 Detailed View', callback_data: 'sidekick_detailed_balances' }],
-        [{ text: '🔙 Back to Balances', callback_data: 'sidekick_balances' }]
-      ];
+    const keyboard = [
+      [{ text: '🔄 Refresh Again', callback_data: 'sidekick_refresh_balances' }],
+      [{ text: '📊 Detailed View', callback_data: 'sidekick_detailed_balances' }],
+      [{ text: '🔙 Back to Balances', callback_data: 'sidekick_balances' }]
+    ];
 
-      await bot.editMessageText(refreshedMessage, {
-        chat_id: chatId,
-        message_id: messageId,
-        parse_mode: 'Markdown',
-        reply_markup: { inline_keyboard: keyboard }
-      });
-    }, 3000);
+    await bot.editMessageText(refreshedMessage, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: keyboard }
+    });
 
   } catch (error) {
     console.error('[Sidekick] Balance refresh error:', error);
-    return bot.editMessageText('❌ Failed to refresh balances', {
+    await bot.editMessageText('❌ Failed to refresh balances. Please try again.', {
       chat_id: chatId,
-      message_id: messageId
+      message_id: messageId,
+      reply_markup: {
+        inline_keyboard: [[{ text: '🔙 Back to Balances', callback_data: 'sidekick_balances' }]]
+      }
     });
   }
 }

@@ -1,11 +1,123 @@
 // database.js
 import sqlite3 from 'sqlite3';
+import encryptionManager from './utils/encryption.js';
+
 const db = new sqlite3.Database('./store.db', (err) => {
   if (err) console.error('[DB] Error:', err.message);
-  else console.log('[DB] SQLite store initialized.');
+  else console.log('[DB] SQLite store initialized with encryption support.');
 });
 
-// === Categories Table ===
+// Database wrapper with encryption support
+class SecureDatabase {
+  constructor(db) {
+    this.db = db;
+    this.encryptedFields = {
+      'wallet_addresses': ['private_key'],
+      'transaction_pins': ['pin_hash'],
+      'payouts': ['notes'], // Encrypt sensitive notes
+      'sidekick_settings': ['value'] // Encrypt settings values
+    };
+  }
+
+  // Encrypt sensitive fields before storage
+  encryptRow(tableName, row, recordId = null) {
+    const fieldsToEncrypt = this.encryptedFields[tableName] || [];
+    const encryptedRow = { ...row };
+    
+    fieldsToEncrypt.forEach(field => {
+      if (encryptedRow[field] && encryptedRow[field] !== null) {
+        try {
+          const id = recordId || Date.now(); // Use recordId or timestamp
+          encryptedRow[field] = encryptionManager.encryptDatabaseField(
+            encryptedRow[field], 
+            tableName, 
+            field, 
+            id
+          );
+        } catch (error) {
+          console.error(`[DB] Encryption error for ${tableName}.${field}:`, error);
+        }
+      }
+    });
+    
+    return encryptedRow;
+  }
+
+  // Decrypt sensitive fields after retrieval
+  decryptRow(tableName, row) {
+    if (!row) return row;
+    
+    const fieldsToDecrypt = this.encryptedFields[tableName] || [];
+    const decryptedRow = { ...row };
+    
+    fieldsToDecrypt.forEach(field => {
+      if (decryptedRow[field] && decryptedRow[field] !== null) {
+        try {
+          decryptedRow[field] = encryptionManager.decryptDatabaseField(
+            decryptedRow[field],
+            tableName,
+            field,
+            row.id || row.user_id || Date.now()
+          );
+        } catch (error) {
+          console.error(`[DB] Decryption error for ${tableName}.${field}:`, error);
+          decryptedRow[field] = '[ENCRYPTED]'; // Fallback for corrupted data
+        }
+      }
+    });
+    
+    return decryptedRow;
+  }
+
+  // Secure run method with encryption
+  run(sql, params = [], callback = null) {
+    return this.db.run(sql, params, callback);
+  }
+
+  // Secure get method with decryption
+  get(sql, params = [], callback = null) {
+    return this.db.get(sql, params, (err, row) => {
+      if (err || !row) {
+        if (callback) callback(err, row);
+        return;
+      }
+      
+      // Extract table name from SQL
+      const tableMatch = sql.match(/FROM\s+(\w+)/i);
+      const tableName = tableMatch ? tableMatch[1] : '';
+      
+      const decryptedRow = this.decryptRow(tableName, row);
+      if (callback) callback(err, decryptedRow);
+    });
+  }
+
+  // Secure all method with decryption
+  all(sql, params = [], callback = null) {
+    return this.db.all(sql, params, (err, rows) => {
+      if (err || !rows) {
+        if (callback) callback(err, rows);
+        return;
+      }
+      
+      // Extract table name from SQL
+      const tableMatch = sql.match(/FROM\s+(\w+)/i);
+      const tableName = tableMatch ? tableMatch[1] : '';
+      
+      const decryptedRows = rows.map(row => this.decryptRow(tableName, row));
+      if (callback) callback(err, decryptedRows);
+    });
+  }
+
+  // Serialize method
+  serialize(callback) {
+    return this.db.serialize(callback);
+  }
+}
+
+// Create secure database wrapper
+const secureDb = new SecureDatabase(db);
+
+// === Categories Table === (unchanged for backward compatibility)
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS categories (
@@ -17,7 +129,7 @@ db.serialize(() => {
   `);
 });
 
-// After creating categories...
+// === Products Table === (unchanged for backward compatibility)
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS products (
@@ -30,6 +142,8 @@ db.serialize(() => {
     )
   `);
 });
+
+// === Orders Table === (unchanged for backward compatibility)
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS orders (
@@ -49,31 +163,8 @@ db.serialize(() => {
     }
   });
 });
-// === Wallet Addresses Table ===
-db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS wallet_addresses (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      currency TEXT NOT NULL,
-      address TEXT NOT NULL,
-      private_key TEXT,
-      label TEXT NOT NULL,
-      tag TEXT NOT NULL,
-      added_by INTEGER NOT NULL,
-      added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `, (err) => {
-    if (err) {
-      console.error('[DB] Wallet Table Error:', err.message);
-    } else {
-      console.log('[DB] Wallet table ready.');
-    }
-  });
-});
 
-
-
-
+// === Users Table === (unchanged for backward compatibility)
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS users (
@@ -88,5 +179,157 @@ db.serialize(() => {
   `);
 });
 
-export default db;
+// === Enhanced Wallet Addresses Table ===
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS wallet_addresses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      currency TEXT NOT NULL,
+      address TEXT NOT NULL,
+      private_key TEXT,  -- Now encrypted
+      label TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      added_by INTEGER NOT NULL,
+      added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      is_encrypted BOOLEAN DEFAULT 1  -- Flag for encryption status
+    )
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Wallet Table Error:', err.message);
+    } else {
+      console.log('[DB] Enhanced wallet table ready with encryption.');
+    }
+  });
+});
+
+// === Sidekick System Tables ===
+db.serialize(() => {
+  // Detected blockchain transactions
+  db.run(`
+    CREATE TABLE IF NOT EXISTS detected_transactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      txid TEXT NOT NULL UNIQUE,
+      currency TEXT NOT NULL,
+      address TEXT NOT NULL,
+      amount REAL NOT NULL,
+      confirmations INTEGER DEFAULT 0,
+      block_height INTEGER,
+      detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      processed BOOLEAN DEFAULT FALSE,
+      notification_sent BOOLEAN DEFAULT FALSE
+    )
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Detected transactions table error:', err);
+    } else {
+      console.log('[DB] Detected transactions table ready.');
+    }
+  });
+
+  // Enhanced payout management
+  db.run(`
+    CREATE TABLE IF NOT EXISTS payouts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      currency TEXT NOT NULL,
+      to_address TEXT NOT NULL,
+      amount REAL NOT NULL,
+      status TEXT DEFAULT 'pending',
+      txid TEXT,
+      created_by INTEGER NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      processed_at TIMESTAMP,
+      notes TEXT,  -- Now encrypted
+      fee_amount REAL DEFAULT 0,
+      priority TEXT DEFAULT 'normal',
+      batch_id TEXT
+    )
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Payouts table error:', err);
+    } else {
+      console.log('[DB] Enhanced payouts table ready.');
+    }
+  });
+
+  // Auto-settlement addresses
+  db.run(`
+    CREATE TABLE IF NOT EXISTS auto_settlement (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      currency TEXT NOT NULL,
+      address TEXT NOT NULL,
+      percentage REAL NOT NULL,
+      label TEXT NOT NULL,
+      enabled BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      min_threshold REAL DEFAULT 0,
+      max_amount REAL
+    )
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Auto settlement table error:', err);
+    } else {
+      console.log('[DB] Enhanced auto settlement table ready.');
+    }
+  });
+
+  // Enhanced transaction pins for security
+  db.run(`
+    CREATE TABLE IF NOT EXISTS transaction_pins (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL UNIQUE,
+      pin_hash TEXT NOT NULL,  -- Now encrypted
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      last_used TIMESTAMP,
+      failed_attempts INTEGER DEFAULT 0,
+      locked_until TIMESTAMP
+    )
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Transaction pins table error:', err);
+    } else {
+      console.log('[DB] Enhanced transaction pins table ready.');
+    }
+  });
+
+  // Enhanced sidekick system settings
+  db.run(`
+    CREATE TABLE IF NOT EXISTS sidekick_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT UNIQUE NOT NULL,
+      value TEXT NOT NULL,  -- Now encrypted
+      category TEXT DEFAULT 'general',
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_by INTEGER
+    )
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Sidekick settings table error:', err);
+    } else {
+      console.log('[DB] Enhanced sidekick settings table ready.');
+    }
+  });
+
+  // Security audit log
+  db.run(`
+    CREATE TABLE IF NOT EXISTS security_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      details TEXT,
+      ip_address TEXT,
+      user_agent TEXT,
+      success BOOLEAN NOT NULL,
+      timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Security log table error:', err);
+    } else {
+      console.log('[DB] Security audit log ready.');
+    }
+  });
+});
+
+export default secureDb;
+export { db }; // Export raw db for backward compatibility
 

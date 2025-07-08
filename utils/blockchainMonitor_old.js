@@ -1,4 +1,4 @@
-// blockchainMonitor.js - Production blockchain monitoring with real APIs (NO BLOCKCHAIR)
+// blockchainMonitor.js - Production blockchain monitoring with real APIs
 import db from '../database.js';
 import { ADMIN_GROUP } from '../config.js';
 import logger from './logger.js';
@@ -14,27 +14,27 @@ class BlockchainMonitor {
       ltc: null
     };
     
-    // Production API endpoints - FREE APIS ONLY
+    // Production API endpoints
     this.apis = {
       btc: {
         blockstream: process.env.BLOCKSTREAM_API || 'https://blockstream.info/api',
         mempool: process.env.MEMPOOL_API || 'https://mempool.space/api',
-        blockcypher: process.env.BLOCKCYPHER_API || 'https://api.blockcypher.com/v1/btc/main'
+        blockchair: process.env.BLOCKCHAIR_API || 'https://api.blockchair.com/bitcoin'
       },
       ltc: {
-        blockcypher: process.env.BLOCKCYPHER_API || 'https://api.blockcypher.com/v1/ltc/main',
-        sochain: 'https://chain.so/api/v2'
+        blockchair: process.env.BLOCKCHAIR_LTC_API || 'https://api.blockchair.com/litecoin',
+        blockcypher: process.env.BLOCKCYPHER_API || 'https://api.blockcypher.com/v1/ltc/main'
       }
     };
     
-    // API keys from environment (optional)
+    // API keys from environment
     this.apiKeys = {
+      blockchair: process.env.BLOCKCHAIR_API_KEY,
       blockcypher: process.env.BLOCKCYPHER_API_KEY
     };
     
     this.checkInterval = parseInt(process.env.BLOCKCHAIN_CHECK_INTERVAL) || 30000; // 30 seconds
     this.processedTxs = new Set(); // Track processed transactions
-    this.walletBalances = new Map(); // Cache wallet balances
   }
 
   async startMonitoring() {
@@ -65,11 +65,6 @@ class BlockchainMonitor {
       logger.error('BLOCKCHAIN', 'Failed to start monitoring', error);
       throw error;
     }
-  }
-
-  async stopMonitoring() {
-    this.isMonitoring = false;
-    logger.info('BLOCKCHAIN', 'Blockchain monitoring stopped');
   }
 
   async loadWalletAddresses() {
@@ -122,7 +117,7 @@ class BlockchainMonitor {
   async getCurrentBlockHeight(currency) {
     try {
       if (currency === 'btc') {
-        // Try Blockstream API first (most reliable and free)
+        // Try Blockstream API first (most reliable)
         try {
           const response = await fetch(`${this.apis.btc.blockstream}/blocks/tip/height`);
           if (response.ok) {
@@ -141,36 +136,27 @@ class BlockchainMonitor {
             return parseInt(height);
           }
         } catch (e) {
-          logger.warn('BLOCKCHAIN', 'Mempool API failed, trying BlockCypher', e.message);
+          logger.warn('BLOCKCHAIN', 'Mempool API failed, trying Blockchair', e.message);
         }
         
-        // Fallback to BlockCypher
-        const url = this.apiKeys.blockcypher 
-          ? `${this.apis.btc.blockcypher}?token=${this.apiKeys.blockcypher}`
-          : `${this.apis.btc.blockcypher}`;
+        // Fallback to Blockchair
+        const url = this.apiKeys.blockchair 
+          ? `${this.apis.btc.blockchair}/stats?key=${this.apiKeys.blockchair}`
+          : `${this.apis.btc.blockchair}/stats`;
           
         const response = await fetch(url);
         const data = await response.json();
-        return data.height;
+        return data.data.blocks;
         
       } else if (currency === 'ltc') {
-        // Try BlockCypher for LTC
-        try {
-          const url = this.apiKeys.blockcypher 
-            ? `${this.apis.ltc.blockcypher}?token=${this.apiKeys.blockcypher}`
-            : `${this.apis.ltc.blockcypher}`;
-            
-          const response = await fetch(url);
-          const data = await response.json();
-          return data.height;
-        } catch (e) {
-          logger.warn('BLOCKCHAIN', 'BlockCypher failed for LTC, trying SoChain', e.message);
-        }
-        
-        // Fallback to SoChain
-        const response = await fetch(`${this.apis.ltc.sochain}/get_info/LTC`);
+        // Try Blockchair for LTC
+        const url = this.apiKeys.blockchair 
+          ? `${this.apis.ltc.blockchair}/stats?key=${this.apiKeys.blockchair}`
+          : `${this.apis.ltc.blockchair}/stats`;
+          
+        const response = await fetch(url);
         const data = await response.json();
-        return parseInt(data.data.blocks);
+        return data.data.blocks;
       }
     } catch (error) {
       logger.error('BLOCKCHAIN', `Failed to get ${currency.toUpperCase()} block height`, error);
@@ -266,32 +252,16 @@ class BlockchainMonitor {
 
   async getLitecoinTransactions(address) {
     try {
-      // Try BlockCypher for Litecoin
-      try {
-        const url = this.apiKeys.blockcypher 
-          ? `${this.apis.ltc.blockcypher}/addrs/${address}?token=${this.apiKeys.blockcypher}`
-          : `${this.apis.ltc.blockcypher}/addrs/${address}`;
-          
-        const response = await fetch(url);
-        const data = await response.json();
+      // Use Blockchair for Litecoin
+      const url = this.apiKeys.blockchair 
+        ? `${this.apis.ltc.blockchair}/dashboards/address/${address}?key=${this.apiKeys.blockchair}`
+        : `${this.apis.ltc.blockchair}/dashboards/address/${address}`;
         
-        if (data.txrefs) {
-          return this.formatLitecoinTransactionsCypher(data.txrefs, address);
-        }
-      } catch (e) {
-        logger.warn('BLOCKCHAIN', 'BlockCypher failed for LTC, trying SoChain', e.message);
-      }
+      const response = await fetch(url);
+      const data = await response.json();
       
-      // Fallback to SoChain
-      try {
-        const response = await fetch(`${this.apis.ltc.sochain}/get_tx_received/LTC/${address}`);
-        const data = await response.json();
-        
-        if (data.status === 'success' && data.data && data.data.txs) {
-          return this.formatLitecoinTransactionsSoChain(data.data.txs, address);
-        }
-      } catch (e) {
-        logger.warn('BLOCKCHAIN', 'SoChain API failed for LTC', e.message);
+      if (data.data && data.data[address] && data.data[address].transactions) {
+        return this.formatLitecoinTransactions(data.data[address].transactions, address);
       }
       
       return [];
@@ -320,30 +290,6 @@ class BlockchainMonitor {
       }
       return null;
     }).filter(Boolean);
-  }
-
-  formatLitecoinTransactionsCypher(txrefs, address) {
-    return txrefs.slice(0, 10).map(txref => ({
-      txid: txref.tx_hash,
-      currency: 'LTC',
-      address: address,
-      amount: (txref.value / 100000000).toFixed(8), // Convert satoshis to LTC
-      confirmations: txref.confirmations || 0,
-      block_height: txref.block_height || 0,
-      timestamp: new Date(txref.confirmed).getTime() / 1000 || Math.floor(Date.now() / 1000)
-    }));
-  }
-
-  formatLitecoinTransactionsSoChain(txs, address) {
-    return txs.slice(0, 10).map(tx => ({
-      txid: tx.txid,
-      currency: 'LTC',
-      address: address,
-      amount: parseFloat(tx.value),
-      confirmations: tx.confirmations || 0,
-      block_height: tx.block_no || 0,
-      timestamp: tx.time || Math.floor(Date.now() / 1000)
-    }));
   }
 
   formatLitecoinTransactions(txs, address) {
@@ -378,11 +324,11 @@ class BlockchainMonitor {
       [tx.txid, tx.currency, tx.address, tx.amount, tx.confirmations, tx.block_height],
       (err) => {
         if (err) {
-          logger.error('BLOCKCHAIN', 'Failed to save detected transaction', err);
+          console.error('[🔍] Failed to save detected transaction:', err);
           return;
         }
 
-        logger.info('BLOCKCHAIN', `New ${tx.currency} transaction detected: ${tx.amount} to ${tx.address}`);
+        console.log(`[🔍] New ${tx.currency} transaction detected: ${tx.amount} to ${tx.address}`);
         this.notifyTransaction(tx);
       }
     );
@@ -414,178 +360,203 @@ Would you like to start the Sidekick menu for transaction management?`;
         }
       });
     } catch (error) {
-      logger.error('BLOCKCHAIN', 'Failed to send notification', error);
+      console.error('[🔍] Failed to send notification:', error);
     }
   }
 
-  // Add new address to monitoring
-  async addAddress(address, currency) {
-    if (currency === 'BTC') {
-      this.btcAddresses.add(address);
-    } else if (currency === 'LTC') {
-      this.ltcAddresses.add(address);
-    }
+  // Real-world integration methods with actual API implementations
+  async integrateBlockCypher() {
+    // BlockCypher API integration
+    const axios = require('axios');
+    const baseUrl = 'https://api.blockcypher.com/v1';
     
-    logger.info('BLOCKCHAIN', `Added ${currency} address to monitoring: ${address}`);
-  }
-
-  // Remove address from monitoring
-  async removeAddress(address, currency) {
-    if (currency === 'BTC') {
-      this.btcAddresses.delete(address);
-    } else if (currency === 'LTC') {
-      this.ltcAddresses.delete(address);
+    try {
+      // Check Bitcoin addresses
+      const btcAddresses = await this.getMonitoredAddresses('BTC');
+      for (const address of btcAddresses) {
+        const response = await axios.get(`${baseUrl}/btc/main/addrs/${address}/full`);
+        const txs = response.data.txs || [];
+        
+        for (const tx of txs.slice(0, 10)) { // Check latest 10 transactions
+          await this.processBlockCypherTransaction(tx, address, 'BTC');
+        }
+      }
+      
+      // Check Litecoin addresses
+      const ltcAddresses = await this.getMonitoredAddresses('LTC');
+      for (const address of ltcAddresses) {
+        const response = await axios.get(`${baseUrl}/ltc/main/addrs/${address}/full`);
+        const txs = response.data.txs || [];
+        
+        for (const tx of txs.slice(0, 10)) {
+          await this.processBlockCypherTransaction(tx, address, 'LTC');
+        }
+      }
+    } catch (error) {
+      console.error('[🔍] BlockCypher API error:', error);
     }
+  }
+
+  async processBlockCypherTransaction(tx, address, currency) {
+    // Find outputs to our address
+    for (const output of tx.outputs || []) {
+      if (output.addresses && output.addresses.includes(address)) {
+        const amount = (output.value / 100000000).toFixed(8); // Convert satoshis to coins
+        
+        const transactionData = {
+          txid: tx.hash,
+          currency,
+          address,
+          amount: parseFloat(amount),
+          confirmations: tx.confirmations || 0,
+          block_height: tx.block_height || 0
+        };
+        
+        await this.processDetectedTransaction(transactionData);
+      }
+    }
+  }
+
+  async integrateBlockchainInfo() {
+    // Blockchain.info API integration
+    const axios = require('axios');
     
-    logger.info('BLOCKCHAIN', `Removed ${currency} address from monitoring: ${address}`);
+    try {
+      const btcAddresses = await this.getMonitoredAddresses('BTC');
+      
+      for (const address of btcAddresses) {
+        try {
+          const response = await axios.get(`https://blockchain.info/rawaddr/${address}?limit=10`);
+          const data = response.data;
+          
+          for (const tx of data.txs || []) {
+            // Find outputs to our address
+            for (const output of tx.out || []) {
+              if (output.addr === address) {
+                const amount = (output.value / 100000000).toFixed(8);
+                
+                const transactionData = {
+                  txid: tx.hash,
+                  currency: 'BTC',
+                  address,
+                  amount: parseFloat(amount),
+                  confirmations: tx.block_height ? (await this.getCurrentBlockHeight('BTC')) - tx.block_height + 1 : 0,
+                  block_height: tx.block_height || 0
+                };
+                
+                await this.processDetectedTransaction(transactionData);
+              }
+            }
+          }
+        } catch (addressError) {
+          console.error(`[🔍] Blockchain.info error for ${address}:`, addressError);
+        }
+      }
+    } catch (error) {
+      console.error('[🔍] Blockchain.info API error:', error);
+    }
   }
 
-  // Get monitoring stats
-  getStats() {
-    return {
-      isMonitoring: this.isMonitoring,
-      btcAddresses: this.btcAddresses.size,
-      ltcAddresses: this.ltcAddresses.size,
-      checkInterval: this.checkInterval,
-      processedTransactions: this.processedTxs.size,
-      lastCheckedBlocks: this.lastCheckedBlocks
-    };
-  }
-
-  // Real balance checking methods
-  async getAddressBalance(address, currency) {
+  async getCurrentBlockHeight(currency) {
+    const axios = require('axios');
+    
     try {
       if (currency === 'BTC') {
-        return await this.getBitcoinBalance(address);
+        const response = await axios.get('https://blockchain.info/latestblock');
+        return response.data.height;
       } else if (currency === 'LTC') {
-        return await this.getLitecoinBalance(address);
+        // Use alternative API for Litecoin
+        const response = await axios.get('https://api.blockcypher.com/v1/ltc/main');
+        return response.data.height;
       }
-      return 0;
     } catch (error) {
-      logger.error('BLOCKCHAIN', `Failed to get balance for ${address}`, error);
+      console.error(`[🔍] Failed to get current block height for ${currency}:`, error);
       return 0;
     }
   }
 
-  async getBitcoinBalance(address) {
+  async integrateBitcoinNode() {
+    // Direct Bitcoin node RPC integration
+    // This requires a running Bitcoin Core node with RPC enabled
+    const axios = require('axios');
+    
+    const rpcConfig = {
+      url: process.env.BITCOIN_RPC_URL || 'http://localhost:8332',
+      auth: {
+        username: process.env.BITCOIN_RPC_USER || 'bitcoin',
+        password: process.env.BITCOIN_RPC_PASS || 'password'
+      }
+    };
+
     try {
-      // Try Blockstream API first
-      try {
-        const response = await fetch(`${this.apis.btc.blockstream}/address/${address}`);
-        if (response.ok) {
-          const data = await response.json();
-          return (data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum) / 100000000; // Convert satoshis to BTC
-        }
-      } catch (e) {
-        logger.warn('BLOCKCHAIN', 'Blockstream balance API failed, trying mempool', e.message);
-      }
+      const addresses = await this.getMonitoredAddresses('BTC');
       
-      // Fallback to Mempool API
-      try {
-        const response = await fetch(`${this.apis.btc.mempool}/address/${address}`);
-        if (response.ok) {
-          const data = await response.json();
-          return (data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum) / 100000000;
-        }
-      } catch (e) {
-        logger.warn('BLOCKCHAIN', 'Mempool balance API failed, trying BlockCypher', e.message);
-      }
-      
-      // Fallback to BlockCypher
-      const url = this.apiKeys.blockcypher 
-        ? `${this.apis.btc.blockcypher}/addrs/${address}/balance?token=${this.apiKeys.blockcypher}`
-        : `${this.apis.btc.blockcypher}/addrs/${address}/balance`;
+      for (const address of addresses) {
+        // Get transactions for address
+        const response = await axios.post(rpcConfig.url, {
+          jsonrpc: '1.0',
+          id: 'molotov',
+          method: 'getaddressinfo',
+          params: [address]
+        }, { auth: rpcConfig.auth });
         
-      const response = await fetch(url);
-      const data = await response.json();
-      return data.balance / 100000000; // Convert satoshis to BTC
-      
+        // This is a simplified example - full implementation would use
+        // listunspent, getrawtransaction, etc.
+        console.log('[🔍] Bitcoin node response:', response.data);
+      }
     } catch (error) {
-      logger.error('BLOCKCHAIN', `Failed to get Bitcoin balance for ${address}`, error);
-      return 0;
+      console.error('[🔍] Bitcoin node RPC error:', error);
     }
   }
 
-  async getLitecoinBalance(address) {
+  async integrateLitecoinNode() {
+    // Direct Litecoin node RPC integration
+    const axios = require('axios');
+    
+    const rpcConfig = {
+      url: process.env.LITECOIN_RPC_URL || 'http://localhost:9332',
+      auth: {
+        username: process.env.LITECOIN_RPC_USER || 'litecoin',
+        password: process.env.LITECOIN_RPC_PASS || 'password'
+      }
+    };
+
     try {
-      // Try BlockCypher for Litecoin
-      try {
-        const url = this.apiKeys.blockcypher 
-          ? `${this.apis.ltc.blockcypher}/addrs/${address}/balance?token=${this.apiKeys.blockcypher}`
-          : `${this.apis.ltc.blockcypher}/addrs/${address}/balance`;
-          
-        const response = await fetch(url);
-        const data = await response.json();
-        return data.balance / 100000000; // Convert satoshis to LTC
-      } catch (e) {
-        logger.warn('BLOCKCHAIN', 'BlockCypher failed for LTC balance, trying SoChain', e.message);
+      const addresses = await this.getMonitoredAddresses('LTC');
+      
+      for (const address of addresses) {
+        const response = await axios.post(rpcConfig.url, {
+          jsonrpc: '1.0',
+          id: 'molotov',
+          method: 'getaddressinfo',
+          params: [address]
+        }, { auth: rpcConfig.auth });
+        
+        console.log('[🔍] Litecoin node response:', response.data);
       }
-      
-      // Fallback to SoChain
-      const response = await fetch(`${this.apis.ltc.sochain}/get_address_balance/LTC/${address}`);
-      const data = await response.json();
-      
-      if (data.status === 'success') {
-        return parseFloat(data.data.confirmed_balance);
-      }
-      
-      return 0;
     } catch (error) {
-      logger.error('BLOCKCHAIN', `Failed to get Litecoin balance for ${address}`, error);
-      return 0;
+      console.error('[🔍] Litecoin node RPC error:', error);
     }
   }
 
-  async getAllWalletBalances() {
-    const balances = new Map();
-    
-    // Get all BTC balances
-    for (const address of this.btcAddresses) {
-      try {
-        const balance = await this.getBitcoinBalance(address);
-        balances.set(`BTC_${address}`, { currency: 'BTC', address, balance });
-      } catch (error) {
-        logger.error('BLOCKCHAIN', `Failed to get BTC balance for ${address}`, error);
-      }
-    }
-    
-    // Get all LTC balances
-    for (const address of this.ltcAddresses) {
-      try {
-        const balance = await this.getLitecoinBalance(address);
-        balances.set(`LTC_${address}`, { currency: 'LTC', address, balance });
-      } catch (error) {
-        logger.error('BLOCKCHAIN', `Failed to get LTC balance for ${address}`, error);
-      }
-    }
-    
-    return balances;
-  }
+  // Enhanced monitoring with multiple API sources
+  async enhancedMonitoring() {
+    if (!this.monitoringActive) return;
 
-  async getTotalBalances() {
-    const balances = await this.getAllWalletBalances();
-    const totals = { BTC: 0, LTC: 0 };
-    
-    for (const [key, data] of balances) {
-      totals[data.currency] += data.balance;
-    }
-    
-    return totals;
-  }
-
-  async getCryptoPrices() {
     try {
-      // Use CoinGecko free API
-      const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,litecoin&vs_currencies=usd');
-      const data = await response.json();
+      // Try different APIs in order of preference
+      await this.integrateBlockCypher();
+      await this.integrateBlockchainInfo();
       
-      return {
-        BTC: data.bitcoin?.usd || 0,
-        LTC: data.litecoin?.usd || 0
-      };
+      // If node RPC is configured, use it too
+      if (process.env.BITCOIN_RPC_URL) {
+        await this.integrateBitcoinNode();
+      }
+      if (process.env.LITECOIN_RPC_URL) {
+        await this.integrateLitecoinNode();
+      }
     } catch (error) {
-      logger.error('BLOCKCHAIN', 'Failed to get crypto prices', error);
-      return { BTC: 0, LTC: 0 };
+      console.error('[🔍] Enhanced monitoring error:', error);
     }
   }
 }
