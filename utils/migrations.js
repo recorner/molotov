@@ -33,6 +33,20 @@ class MigrationManager {
         description: 'Add scheduling capabilities to payouts',
         up: this.migration_004_add_scheduling.bind(this),
         down: this.migration_004_down.bind(this)
+      },
+      {
+        version: 5,
+        name: 'enhance_language_support',
+        description: 'Enhance multi-language support and user preferences',
+        up: this.migration_005_enhance_language_support.bind(this),
+        down: this.migration_005_down.bind(this)
+      },
+      {
+        version: 6,
+        name: 'fix_language_support_columns',
+        description: 'Fix missing columns for language support',
+        up: this.migration_006_fix_language_columns.bind(this),
+        down: this.migration_006_down.bind(this)
       }
     ];
     
@@ -367,6 +381,143 @@ class MigrationManager {
 
   async migration_004_down() {
     logger.warn('MIGRATION', 'Rollback for migration 004 not implemented (scheduling features)');
+  }
+
+  // Migration 005: Enhance language support
+  async migration_005_enhance_language_support() {
+    return new Promise((resolve, reject) => {
+      db.serialize(() => {
+        // Enhance users table for better language support
+        const alterations = [
+          // Add timezone support
+          `ALTER TABLE users ADD COLUMN timezone TEXT DEFAULT 'UTC'`,
+          
+          // Add language preference timestamp
+          `ALTER TABLE users ADD COLUMN language_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+          
+          // Add user preferences JSON field (encrypted)
+          `ALTER TABLE users ADD COLUMN preferences TEXT`,
+          
+          // Add user status for better management
+          `ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active'`,
+          
+          // Add last activity tracking
+          `ALTER TABLE users ADD COLUMN last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP`
+        ];
+
+        let completed = 0;
+        const total = alterations.length;
+
+        alterations.forEach(sql => {
+          db.run(sql, (err) => {
+            if (err && !err.message.includes('duplicate column')) {
+              logger.error('MIGRATION', `Failed to execute: ${sql}`, err);
+            }
+            
+            completed++;
+            if (completed === total) {
+              // Create language usage statistics table
+              db.run(`
+                CREATE TABLE IF NOT EXISTS language_stats (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  language_code TEXT NOT NULL,
+                  user_count INTEGER DEFAULT 0,
+                  active_users INTEGER DEFAULT 0,
+                  daily_users INTEGER DEFAULT 0,
+                  last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE(language_code)
+                )
+              `, (err) => {
+                if (err) {
+                  logger.error('MIGRATION', 'Failed to create language_stats table', err);
+                  reject(err);
+                } else {
+                  // Create translation cache table
+                  db.run(`
+                    CREATE TABLE IF NOT EXISTS translation_cache (
+                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      source_text TEXT NOT NULL,
+                      target_language TEXT NOT NULL,
+                      translated_text TEXT NOT NULL,
+                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                      expires_at TIMESTAMP,
+                      hit_count INTEGER DEFAULT 1,
+                      UNIQUE(source_text, target_language)
+                    )
+                  `, (err) => {
+                    if (err) {
+                      logger.error('MIGRATION', 'Failed to create translation_cache table', err);
+                      reject(err);
+                    } else {
+                      logger.info('MIGRATION', 'Successfully enhanced language support');
+                      resolve();
+                    }
+                  });
+                }
+              });
+            }
+          });
+        });
+      });
+    });
+  }
+
+  async migration_005_down() {
+    logger.warn('MIGRATION', 'Rollback for migration 005 not implemented (language enhancements)');
+  }
+
+  // Migration 006: Fix missing language support columns
+  async migration_006_fix_language_columns() {
+    return new Promise((resolve, reject) => {
+      db.serialize(() => {
+        // Add missing columns to users table
+        const userAlterations = [
+          `ALTER TABLE users ADD COLUMN last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+          `ALTER TABLE users ADD COLUMN language_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`
+        ];
+
+        let completed = 0;
+        const totalUserAlterations = userAlterations.length;
+
+        userAlterations.forEach(sql => {
+          db.run(sql, (err) => {
+            if (err && !err.message.includes('duplicate column')) {
+              logger.error('MIGRATION', `Failed to execute: ${sql}`, err);
+            }
+            
+            completed++;
+            if (completed === totalUserAlterations) {
+              // Add missing columns to language_stats table
+              const statsAlterations = [
+                `ALTER TABLE language_stats ADD COLUMN active_users INTEGER DEFAULT 0`,
+                `ALTER TABLE language_stats ADD COLUMN daily_users INTEGER DEFAULT 0`
+              ];
+
+              let statsCompleted = 0;
+              const totalStatsAlterations = statsAlterations.length;
+
+              statsAlterations.forEach(sql => {
+                db.run(sql, (err) => {
+                  if (err && !err.message.includes('duplicate column')) {
+                    logger.error('MIGRATION', `Failed to execute: ${sql}`, err);
+                  }
+                  
+                  statsCompleted++;
+                  if (statsCompleted === totalStatsAlterations) {
+                    logger.info('MIGRATION', 'Successfully fixed language support columns');
+                    resolve();
+                  }
+                });
+              });
+            }
+          });
+        });
+      });
+    });
+  }
+
+  async migration_006_down() {
+    logger.warn('MIGRATION', 'Rollback for migration 006 not implemented (language column fixes)');
   }
 
   // Export for use in bot.js

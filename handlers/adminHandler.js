@@ -1,6 +1,7 @@
 import db from '../database.js';
 import { ADMIN_IDS, ADMIN_GROUP } from '../config.js';
 import { formatTimeAgo } from '../utils/date.js';
+import languageStatsManager from '../utils/languageStats.js';
 
 // === Handle /cocktail Command ===
 export function handleAdminCommand(bot, msg) {
@@ -15,6 +16,7 @@ export function handleAdminCommand(bot, msg) {
     reply_markup: {
       inline_keyboard: [
         [{ text: '📥 Address Management', callback_data: 'panel_address' }],
+        [{ text: '🌍 Language Analytics', callback_data: 'panel_language_stats' }],
         [{ text: '🖥️ Cloud Shell', callback_data: 'panel_shell' }],
         [{ text: '🏠 Go to Lobby', url: `https://t.me/+g1nH977AIqhkNjBk` }]
       ]
@@ -48,6 +50,33 @@ export function handleAdminCallback(bot, query) {
         ]
       }
     });
+  }
+
+  // === Submenu: Language Analytics ===
+  if (data === 'panel_language_stats') {
+    languageStatsManager.formatLanguageReport().then(report => {
+      bot.editMessageText(report, {
+        chat_id: chatId,
+        message_id: messageId,
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔄 Refresh Stats', callback_data: 'panel_language_stats' }],
+            [{ text: '🔙 Back', callback_data: 'cocktail_back' }]
+          ]
+        }
+      });
+    }).catch(err => {
+      console.error('[Language Stats Error]', err);
+      bot.editMessageText('❌ Error loading language statistics', {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: {
+          inline_keyboard: [[{ text: '🔙 Back', callback_data: 'cocktail_back' }]]
+        }
+      });
+    });
+    return;
   }
 
   // === Submenu: List Active Wallets ===

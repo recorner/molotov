@@ -10,13 +10,18 @@ import { MigrationManager } from './utils/migrations.js';
 
 // Handlers
 import { showRootCategories } from './handlers/rootCategoryHandler.js';
-import { handleStart } from './handlers/userHandler.js';
+import { handleStart, handleLanguageSelection } from './handlers/userHandler.js';
 import { handleCategoryNavigation } from './handlers/categoryHandler.js';
 import { showProductsInCategory } from './handlers/productHandler.js';
 import { handleWalletCallback } from './handlers/walletHandler.js';
 import { setupDailyWalletPrompt, handleWalletPromptResponse } from './scheduler.js';
 import { handleWalletInput, handleWalletFinalSave } from './handlers/walletHandler.js';
 import { handleAdminPaymentAction, handleProductDelivery } from './handlers/paymentHandler.js';
+
+// Translation Services
+import translationService from './utils/translationService.js';
+import messageTranslator from './utils/messageTranslator.js';
+import TelegramSafety from './utils/telegramSafety.js';
 
 // Sidekick System Imports
 import { handleSidekickCallback, initializeSidekickInputHandler } from './handlers/sidekickHandler.js';
@@ -48,6 +53,9 @@ const bot = new TelegramBot(BOT_TOKEN, {
     }
   }
 });
+
+// Apply telegram safety patches immediately after bot creation
+TelegramSafety.patchBot(bot);
 
 // Global instances
 let sidekickInputHandler = null;
@@ -230,14 +238,14 @@ logger.logSystemEvent('BOT_STARTED', { version: '2.0.0', sidekick: true });
 
 bot.sendMessage(
   ADMIN_GROUP,
-  `🔁 *molotov bot restarted*\n🟢 Status: Online\n🚀 Sidekick System: Active\n🔐 Encryption: Enabled\n🕒 ${new Date().toLocaleString()}`,
+  `🔁 *molotov bot restarted*\n🟢 Status: Online\n🚀 Sidekick System: Active\n🔐 Encryption: Enabled\n🌍 Multi-Language: Active\n📡 LibreTranslate: Ready\n🕒 ${new Date().toLocaleString()}`,
   { parse_mode: 'Markdown' }
 ).catch(err => {
   console.error('[Startup Message Error]', err.message);
   // Try without markdown if markdown fails
   bot.sendMessage(
     ADMIN_GROUP,
-    `🔁 molotov bot restarted\n🟢 Status: Online\n🚀 Sidekick System: Active\n🔐 Encryption: Enabled\n🕒 ${new Date().toLocaleString()}`
+    `🔁 molotov bot restarted\n🟢 Status: Online\n🚀 Sidekick System: Active\n🔐 Encryption: Enabled\n🌍 Multi-Language: Active\n📡 LibreTranslate: Ready\n🕒 ${new Date().toLocaleString()}`
   ).catch(e => console.error('[Fallback Message Error]', e.message));
 });
 
@@ -275,7 +283,7 @@ bot.on('callback_query', async (query) => {
 
   try {
     if (!data) {
-      return await bot.answerCallbackQuery(query.id, { text: '❌ Invalid callback data.' });
+      return await messageTranslator.answerTranslatedCallback(bot, query.id, 'Invalid callback data.', userId);
     }
 
     // Rate limiting to prevent spam/hallucination
@@ -284,7 +292,7 @@ bot.on('callback_query', async (query) => {
     const now = Date.now();
     
     if (lastCall && now - lastCall < 1000) { // 1 second cooldown
-      return await bot.answerCallbackQuery(query.id, { text: '⏱️ Please wait before trying again.' });
+      return await messageTranslator.answerTranslatedCallback(bot, query.id, 'please_wait', userId);
     }
     
     callbackCooldowns.set(cooldownKey, now);
@@ -293,6 +301,23 @@ bot.on('callback_query', async (query) => {
     for (const [key, timestamp] of callbackCooldowns.entries()) {
       if (now - timestamp > 300000) {
         callbackCooldowns.delete(key);
+      }
+    }
+
+    // LANGUAGE SELECTION
+    if (data.startsWith('lang_') || data === 'change_language') {
+      if (data === 'change_language') {
+        // Show language selection menu
+        const languageMessage = await messageTranslator.createLanguageSelectionMessage(userId);
+        return await bot.editMessageText(languageMessage.text, {
+          chat_id: chatId,
+          message_id: messageId,
+          parse_mode: 'Markdown',
+          reply_markup: languageMessage.reply_markup
+        });
+      } else {
+        // Handle language selection
+        return await handleLanguageSelection(bot, query);
       }
     }
 
@@ -309,7 +334,7 @@ bot.on('callback_query', async (query) => {
 
       if (isNaN(categoryId) || isNaN(page)) {
         console.warn('[Pagination Error] Invalid category ID or page number in callback:', data);
-        return await bot.answerCallbackQuery(query.id, { text: '⚠️ Invalid pagination data.' });
+        return await messageTranslator.answerTranslatedCallback(bot, query.id, 'invalid_pagination', userId);
       }
 
       return await showProductsInCategory(bot, chatId, categoryId, page, messageId);
@@ -394,11 +419,11 @@ bot.on('callback_query', async (query) => {
 
     // Fallback for unknown callbacks - Add more specific error handling
     console.warn('[Callback] Unknown callback data:', data);
-    return await bot.answerCallbackQuery(query.id, { text: '🤷 Unknown action. Please try again.' });
+    return await messageTranslator.answerTranslatedCallback(bot, query.id, 'unknown_action', userId);
 
   } catch (err) {
     console.error('[Callback Error]', err);
-    return await bot.answerCallbackQuery(query.id, { text: '⚠️ Error processing your action.' });
+    return await messageTranslator.answerTranslatedCallback(bot, query.id, 'error_processing', userId);
   }
 });
 

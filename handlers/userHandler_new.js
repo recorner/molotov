@@ -95,15 +95,15 @@ export async function showCategoriesMenu(bot, userId, isWelcome = true) {
       if (isWelcome) {
         // Send welcome message
         const welcomeText = await messageTranslator.translateForUser(
-          `👋 Welcome back ${firstName} to the Digital Syndicate.\n\n` +
-          `🌐 The Darkest Vault for Premium Digital Access.\n\n` +
+          `👋 *Welcome back ${firstName} to the Digital Syndicate.*\n\n` +
+          `🌐 *The Darkest Vault for Premium Digital Access.*\n\n` +
           `🛒 Browse a curated stash of:\n` +
           `• ⚡ Instant Enrollments\n` +
           `• 📲 Verified App & Bank Open-Ups\n` +
           `• 🛰️ Elite Proxy Networks\n` +
           `• ☎️ Clean, Trusted Phone Numbers\n\n` +
-          `💳 Payments via Bitcoin or Litecoin only.\n` +
-          `🕶️ Operated by trusted hands — we're the best in the game.\n\n` +
+          `💳 Payments via *Bitcoin* or *Litecoin* only.\n` +
+          `🕶️ Operated by trusted hands — *we're the best in the game.*\n\n` +
           `👇 Tap below to dive in or reach out to Admin if you need priority access:`,
           userId
         );
@@ -171,7 +171,7 @@ export async function showCategoriesMenu(bot, userId, isWelcome = true) {
 
           const categoryMessage = await messageTranslator.translateForUser('select_category', userId);
           
-          bot.sendMessage(userId, `🛍️ ${categoryMessage}`, {
+          bot.sendMessage(userId, `🛍️ *${categoryMessage}*`, {
             parse_mode: 'Markdown',
             reply_markup: { inline_keyboard: buttons }
           });
