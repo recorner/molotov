@@ -86,6 +86,7 @@ class MessageTranslator {
       'payment_help': 'Payment Help',
       'refresh_status': 'Refresh Status',
       'back_to_store': 'Back to Store',
+      'cancel_order': 'Cancel Order',
     };
   }
 
