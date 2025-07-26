@@ -322,7 +322,7 @@ class TranslationService {
 const translationService = new TranslationService();
 
 // Test connection on startup
-translationService.testConnection().then(success => {
+translationService.testConnection().then(async (success) => {
   if (success) {
     console.log('[✅] LibreTranslate service is ready');
   } else {

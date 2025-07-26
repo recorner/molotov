@@ -22,21 +22,19 @@ export async function handleBuyCallback(bot, query) {
     });
 
     if (!product) {
-      const errorMsg = await messageTranslator.translateForUser('error_loading', from.id);
-      return bot.answerCallbackQuery(query.id, { text: errorMsg });
+      const errorMsg = await messageTranslator.translateTemplateForUser('error_loading', from.id);
+      return await bot.answerCallbackQuery(callbackQuery.id, { text: errorMsg, show_alert: true });
     }
-
-    const orderSummaryTitle = await messageTranslator.translateTemplate('order_summary', await translationService.getUserLanguage(from.id));
-    const productLabel = await messageTranslator.translateTemplate('product_label', await translationService.getUserLanguage(from.id));
-    const priceLabel = await messageTranslator.translateTemplate('price_label', await translationService.getUserLanguage(from.id));
-    const descriptionLabel = await messageTranslator.translateTemplate('description_label', await translationService.getUserLanguage(from.id));
-    const dateLabel = await messageTranslator.translateTemplate('date_label', await translationService.getUserLanguage(from.id));
-    const paymentOptionsTitle = await messageTranslator.translateTemplate('payment_options', await translationService.getUserLanguage(from.id));
-    const choosePaymentMethod = await messageTranslator.translateTemplate('choose_payment_method', await translationService.getUserLanguage(from.id));
     
-    const noDescription = await messageTranslator.translateTemplate('no_description', await translationService.getUserLanguage(from.id));
-
-    const text = `🛍️ **${orderSummaryTitle}**\n\n` +
+    const orderSummaryTitle = await messageTranslator.translateTemplateForUser('order_summary', from.id);
+    const productLabel = await messageTranslator.translateTemplateForUser('product_label', from.id);
+    const priceLabel = await messageTranslator.translateTemplateForUser('price_label', from.id);
+    const descriptionLabel = await messageTranslator.translateTemplateForUser('description_label', from.id);
+    const dateLabel = await messageTranslator.translateTemplateForUser('date_label', from.id);
+    const paymentOptionsTitle = await messageTranslator.translateTemplateForUser('payment_options', from.id);
+    const choosePaymentMethod = await messageTranslator.translateTemplateForUser('choose_payment_method', from.id);
+    
+    const noDescription = await messageTranslator.translateTemplateForUser('no_description', from.id);    const text = `🛍️ **${orderSummaryTitle}**\n\n` +
       `🛒 **${productLabel}:** ${product.name}\n` +
       `💰 **${priceLabel}:** $${product.price}\n` +
       `📝 **${descriptionLabel}:** ${product.description || noDescription}\n` +
@@ -45,11 +43,11 @@ export async function handleBuyCallback(bot, query) {
       `🔐 **${paymentOptionsTitle}**\n` +
       `${choosePaymentMethod}`;
 
-    const bitcoinText = await messageTranslator.translateTemplate('bitcoin_payment', await translationService.getUserLanguage(from.id));
-    const litecoinText = await messageTranslator.translateTemplate('litecoin_payment', await translationService.getUserLanguage(from.id));
-    const paymentGuideText = await messageTranslator.translateTemplate('payment_guide', await translationService.getUserLanguage(from.id));
-    const cancelOrderText = await messageTranslator.translateTemplate('cancel_order', await translationService.getUserLanguage(from.id));
-    const backToProductsText = await messageTranslator.translateTemplate('back_to_products', await translationService.getUserLanguage(from.id));
+    const bitcoinText = await messageTranslator.translateTemplateForUser('bitcoin_payment', from.id);
+    const litecoinText = await messageTranslator.translateTemplateForUser('litecoin_payment', from.id);
+    const paymentGuideText = await messageTranslator.translateTemplateForUser('payment_guide', from.id);
+    const cancelOrderText = await messageTranslator.translateTemplateForUser('cancel_order', from.id);
+    const backToProductsText = await messageTranslator.translateTemplateForUser('back_to_products', from.id);
 
     const buttons = [
       [
@@ -72,7 +70,7 @@ export async function handleBuyCallback(bot, query) {
 
   } catch (error) {
     console.error('[Buy Callback Error]', error);
-    const errorMsg = await messageTranslator.translateForUser('error_processing', from.id);
+    const errorMsg = await messageTranslator.translateTemplateForUser('error_processing', from.id);
     bot.answerCallbackQuery(query.id, { text: errorMsg });
   }
 }
@@ -93,7 +91,7 @@ export async function handlePaymentSelection(bot, query) {
     });
 
     if (!product) {
-      const errorMsg = await messageTranslator.translateForUser('error_loading', from.id);
+      const errorMsg = await messageTranslator.translateTemplateForUser('error_loading', from.id);
       return bot.answerCallbackQuery(query.id, { text: errorMsg });
     }
 
@@ -141,21 +139,19 @@ export async function handlePaymentSelection(bot, query) {
     const currencyEmoji = currency === 'btc' ? '₿' : '🪙';
     const currencyName = currency === 'btc' ? 'Bitcoin' : 'Litecoin';
     
-    const userLang = await translationService.getUserLanguage(from.id);
-    
     // Get translations for payment instructions
-    const paymentInstructions = await messageTranslator.translateTemplate('payment_instructions', userLang);
-    const orderIdLabel = await messageTranslator.translateTemplate('order_id', userLang);
-    const productLabel = await messageTranslator.translateTemplate('product_label', userLang);
-    const amountLabel = await messageTranslator.translateTemplate('amount_label', userLang);
-    const currencyLabel = await messageTranslator.translateTemplate('currency_label', userLang);
-    const sendPaymentTo = await messageTranslator.translateTemplate('send_payment_to', userLang);
-    const importantLabel = await messageTranslator.translateTemplate('important_label', userLang);
-    const sendExactly = await messageTranslator.translateTemplate('send_exactly', userLang);
-    const doubleCheck = await messageTranslator.translateTemplate('double_check_address', userLang);
-    const confirmTime = await messageTranslator.translateTemplate('confirmation_time', userLang);
-    const keepTxId = await messageTranslator.translateTemplate('keep_transaction_id', userLang);
-    const afterSending = await messageTranslator.translateTemplate('after_sending_payment', userLang);
+    const paymentInstructions = await messageTranslator.translateTemplateForUser('payment_instructions', from.id);
+    const orderIdLabel = await messageTranslator.translateTemplateForUser('order_id', from.id);
+    const productLabel = await messageTranslator.translateTemplateForUser('product_label', from.id);
+    const amountLabel = await messageTranslator.translateTemplateForUser('amount_label', from.id);
+    const currencyLabel = await messageTranslator.translateTemplateForUser('currency_label', from.id);
+    const sendPaymentTo = await messageTranslator.translateTemplateForUser('send_payment_to', from.id);
+    const importantLabel = await messageTranslator.translateTemplateForUser('important_label', from.id);
+    const sendExactly = await messageTranslator.translateTemplateForUser('send_exactly', from.id);
+    const doubleCheck = await messageTranslator.translateTemplateForUser('double_check_address', from.id);
+    const confirmTime = await messageTranslator.translateTemplateForUser('confirmation_time', from.id);
+    const keepTxId = await messageTranslator.translateTemplateForUser('keep_transaction_id', from.id);
+    const afterSending = await messageTranslator.translateTemplateForUser('after_sending_payment', from.id);
     
     const msg = `💳 **${paymentInstructions}**\n\n` +
       `🧾 **${orderIdLabel}:** #${orderId}\n` +
@@ -174,12 +170,12 @@ export async function handlePaymentSelection(bot, query) {
       `**${afterSending}:**`;
 
     // Get button translations
-    const sentPayment = await messageTranslator.translateTemplate('sent_payment', userLang);
-    const copyAddress = await messageTranslator.translateTemplate('copy_address', userLang);
-    const paymentHelp = await messageTranslator.translateTemplate('payment_help', userLang);
-    const refreshStatus = await messageTranslator.translateTemplate('refresh_status', userLang);
-    const cancelOrder = await messageTranslator.translateTemplate('cancel_order', userLang);
-    const backToStore = await messageTranslator.translateTemplate('back_to_store', userLang);
+    const sentPayment = await messageTranslator.translateTemplateForUser('sent_payment', from.id);
+    const copyAddress = await messageTranslator.translateTemplateForUser('copy_address', from.id);
+    const paymentHelp = await messageTranslator.translateTemplateForUser('payment_help', from.id);
+    const refreshStatus = await messageTranslator.translateTemplateForUser('refresh_status', from.id);
+    const cancelOrder = await messageTranslator.translateTemplateForUser('cancel_order', from.id);
+    const backToStore = await messageTranslator.translateTemplateForUser('back_to_store', from.id);
 
     const paymentButtons = [
       [
@@ -205,7 +201,7 @@ export async function handlePaymentSelection(bot, query) {
 
   } catch (error) {
     console.error('[Payment Selection Error]', error);
-    const errorMsg = await messageTranslator.translateForUser('error_processing', from.id);
+    const errorMsg = await messageTranslator.translateTemplateForUser('error_processing', from.id);
     bot.answerCallbackQuery(query.id, { text: errorMsg });
   }
 }

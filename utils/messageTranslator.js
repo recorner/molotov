@@ -1,16 +1,23 @@
-// utils/messageTranslator.js - Message translation middleware
+// utils/messageTranslator.js - Message translation middleware with instant response
 import translationService from './translationService.js';
+import prebuiltTranslations from './prebuiltTranslations.js';
+import instantTranslationService from './instantTranslationService.js';
 import markdownSafeTranslator from './markdownSafeTranslator.js';
 import logger from './logger.js';
 
 class MessageTranslator {
   constructor() {
+    this.isInitialized = false;
+    
     // Common message templates that should be translated
     this.messageTemplates = {
       // Welcome and navigation
       'welcome_message': '🚀 *Welcome to Molotov Bot*\n\n💎 Your premium digital marketplace for cryptocurrency products.',
+      'welcome_back_message': '👋 Welcome back {firstName} to the Digital Syndicate.\n\n🌐 The Darkest Vault for Premium Digital Access.\n\n🛒 Browse a curated stash of:\n• ⚡ Instant Enrollments\n• 📲 Verified App & Bank Open-Ups\n• 🛰️ Elite Proxy Networks\n• ☎️ Clean, Trusted Phone Numbers\n\n💳 Payments via Bitcoin or Litecoin only.\n🕶️ Operated by trusted hands — we\'re the best in the game.\n\n👇 Tap below to dive in or reach out to Admin if you need priority access:',
+      'browse_categories_button': '🛍️ Browse Categories',
       'select_language': '🌍 *Choose Your Language*\n\nPlease select your preferred language to continue:',
       'language_updated': '✅ *Language Updated Successfully*\n\n🌍 Your interface is now in {language}',
+      'language_updated_loading': 'Language updated! Loading categories...',
       'language_error': '❌ *Error Updating Language*\n\nPlease try again.',
       
       // Categories and products
@@ -90,8 +97,24 @@ class MessageTranslator {
     };
   }
 
-  // Translate a predefined message template
+  // Initialize the message translator with instant service
+  async initialize() {
+    if (this.isInitialized) return true;
+
+    try {
+      await instantTranslationService.initialize();
+      this.isInitialized = true;
+      logger.info('TRANSLATOR', 'Message translator initialized with instant service');
+      return true;
+    } catch (error) {
+      logger.warn('TRANSLATOR', `Initialization failed: ${error.message}`);
+      return false;
+    }
+  }
+
+  // Translate a predefined message template with instant response
   async translateTemplate(templateKey, targetLang, replacements = {}) {
+    // Get the base template
     let message = this.messageTemplates[templateKey];
     
     if (!message) {
@@ -99,13 +122,45 @@ class MessageTranslator {
       return templateKey; // Return key if template not found
     }
 
-    // Apply replacements before translation
-    for (const [key, value] of Object.entries(replacements)) {
-      message = message.replace(new RegExp(`{${key}}`, 'g'), value);
+    // For English, apply replacements and return immediately
+    if (targetLang === 'en' || !targetLang) {
+      for (const [key, value] of Object.entries(replacements)) {
+        message = message.replace(new RegExp(`{${key}}`, 'g'), value);
+      }
+      return message;
     }
 
-    // Translate the message
-    return await translationService.translate(message, targetLang);
+    try {
+      // Use instant translation service (Redis cache first, then fallback)
+      const translatedMessage = await instantTranslationService.getTranslation(
+        templateKey, 
+        targetLang, 
+        message
+      );
+
+      // Apply replacements to translated message
+      let finalMessage = translatedMessage;
+      for (const [key, value] of Object.entries(replacements)) {
+        finalMessage = finalMessage.replace(new RegExp(`{${key}}`, 'g'), value);
+      }
+
+      return finalMessage;
+
+    } catch (error) {
+      logger.warn('TRANSLATOR', `Translation failed for ${templateKey}:${targetLang}, using English fallback`);
+      
+      // Apply replacements to English fallback
+      for (const [key, value] of Object.entries(replacements)) {
+        message = message.replace(new RegExp(`{${key}}`, 'g'), value);
+      }
+      return message;
+    }
+  }
+
+  // Fast template translation for user (uses cache efficiently)
+  async translateTemplateForUser(templateKey, telegramId, replacements = {}) {
+    const userLang = await translationService.getUserLanguage(telegramId);
+    return await this.translateTemplate(templateKey, userLang, replacements);
   }
 
   // Translate a message for a specific user
@@ -123,7 +178,8 @@ class MessageTranslator {
       processedText = processedText.replace(new RegExp(`{${key}}`, 'g'), value);
     }
     
-    return await translationService.translate(processedText, userLang);
+    // Use instant translation service instead of slow translationService
+    return await instantTranslationService.getTranslation('custom_text', userLang, processedText);
   }
 
   // Create a translated message object for bot.sendMessage

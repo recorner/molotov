@@ -2,6 +2,7 @@
 import db from '../database.js';
 import translationService from '../utils/translationService.js';
 import messageTranslator from '../utils/messageTranslator.js';
+import instantTranslationService from '../utils/instantTranslationService.js';
 
 export async function showProductsInCategory(bot, chatId, categoryId, page = 1, messageId = null) {
   // Ensure categoryId and page are valid
@@ -12,7 +13,6 @@ export async function showProductsInCategory(bot, chatId, categoryId, page = 1, 
 
   const PAGE_SIZE = 5;
   const offset = Math.max((page - 1) * PAGE_SIZE, 0);
-  const userLang = await translationService.getUserLanguage(chatId);
 
   // First: check if products exist at all for category
   db.get(`SELECT COUNT(*) as total FROM products WHERE category_id = ?`, [categoryId], async (err, result) => {
@@ -27,7 +27,7 @@ export async function showProductsInCategory(bot, chatId, categoryId, page = 1, 
     const offset = (page - 1) * PAGE_SIZE;
 
     if (total === 0) {
-      const noProductsMsg = await messageTranslator.translateForUser('no_products', chatId);
+      const noProductsMsg = await messageTranslator.translateTemplateForUser('no_products', chatId);
       return sendOrEdit(bot, chatId, messageId, `📭 *${noProductsMsg}*`, []);
     }
 
@@ -42,46 +42,46 @@ export async function showProductsInCategory(bot, chatId, categoryId, page = 1, 
         }
 
         if (!products || products.length === 0) {
-          const noProductsPageMsg = await messageTranslator.translateForUser('no_products_page', chatId);
+          const noProductsPageMsg = await messageTranslator.translateTemplateForUser('no_products_page', chatId);
           return sendOrEdit(bot, chatId, messageId, `📭 *${noProductsPageMsg}*`, []);
         }
 
-        let text = await messageTranslator.translateForUser('products_in_category', chatId);
-        text = `🛒 *${text}:*\n\n`;
+        const headerText = await messageTranslator.translateTemplateForUser('products_in_category', chatId);
+        let text = `🛒 *${headerText}:*\n\n`;
         const keyboard = [];
 
         for (const product of products) {
-          // Translate product name and description
-          const translatedName = await translationService.translate(product.name, userLang);
+          // Translate product name and description using instant service
+          const translatedName = await instantTranslationService.getTranslation(product.name, chatId);
           const translatedDesc = product.description ? 
-            await translationService.translate(product.description, userLang) : 
-            await messageTranslator.translateForUser('No description.', chatId);
+            await instantTranslationService.getTranslation(product.description, chatId) : 
+            await messageTranslator.translateTemplateForUser('no_description', chatId);
 
           text += `• *${translatedName}*\n`;
           text += `💬 _${translatedDesc}_\n`;
           text += `💰 *${messageTranslator.formatPrice(product.price)}*\n\n`;
 
-          const buyText = await messageTranslator.translateForUser('Buy', chatId);
+          const buyText = await messageTranslator.translateTemplateForUser('buy_product', chatId);
           keyboard.push([{
-            text: `🛍️ ${buyText} ${translatedName}`,
+            text: `${buyText} ${translatedName}`,
             callback_data: `buy_${product.id}`
           }]);
         }
 
         const navRow = [];
         if (page > 1) {
-          const prevText = await messageTranslator.translateForUser('previous_page', chatId);
-          navRow.push({ text: `⬅️ ${prevText}`, callback_data: `page_${categoryId}_${page - 1}` });
+          const prevText = await messageTranslator.translateTemplateForUser('previous_page', chatId);
+          navRow.push({ text: `${prevText}`, callback_data: `page_${categoryId}_${page - 1}` });
         }
         if (page < totalPages) {
-          const nextText = await messageTranslator.translateForUser('next_page', chatId);
-          navRow.push({ text: `➡️ ${nextText}`, callback_data: `page_${categoryId}_${page + 1}` });
+          const nextText = await messageTranslator.translateTemplateForUser('next_page', chatId);
+          navRow.push({ text: `${nextText}`, callback_data: `page_${categoryId}_${page + 1}` });
         }
 
         keyboard.push(navRow);
         
-        const backText = await messageTranslator.translateForUser('back_to_categories', chatId);
-        keyboard.push([{ text: `🔙 ${backText}`, callback_data: 'back_to_categories' }]);
+        const backText = await messageTranslator.translateTemplateForUser('back_to_categories', chatId);
+        keyboard.push([{ text: `${backText}`, callback_data: 'back_to_categories' }]);
 
         sendOrEdit(bot, chatId, messageId, text, keyboard);
       }

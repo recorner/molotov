@@ -6,6 +6,9 @@ bot_state.encrypted
 # Node modules
 node_modules/
 
+# Generated files
+generated/
+
 # Logs
 logs/
 *.log

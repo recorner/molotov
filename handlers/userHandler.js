@@ -3,6 +3,7 @@ import db from '../database.js';
 import { notifyGroup } from '../utils/notifyGroup.js';
 import translationService from '../utils/translationService.js';
 import messageTranslator from '../utils/messageTranslator.js';
+import instantTranslationService from '../utils/instantTranslationService.js';
 
 export function handleStart(bot, msg) {
   const userId = msg.from.id;
@@ -76,26 +77,16 @@ export function handleStart(bot, msg) {
 // Function to show categories menu with translation
 export async function showCategoriesMenu(bot, userId, isWelcome = true) {
   try {
-    const userLang = await translationService.getUserLanguage(userId);
-    
     // Get user info for personalized greeting
     db.get('SELECT first_name FROM users WHERE telegram_id = ?', [userId], async (err, user) => {
       const firstName = user?.first_name || 'there';
       
       if (isWelcome) {
-        // Send welcome message
-        const welcomeText = await messageTranslator.translateForUser(
-          `👋 Welcome back ${firstName} to the Digital Syndicate.\n\n` +
-          `🌐 The Darkest Vault for Premium Digital Access.\n\n` +
-          `🛒 Browse a curated stash of:\n` +
-          `• ⚡ Instant Enrollments\n` +
-          `• 📲 Verified App & Bank Open-Ups\n` +
-          `• 🛰️ Elite Proxy Networks\n` +
-          `• ☎️ Clean, Trusted Phone Numbers\n\n` +
-          `💳 Payments via Bitcoin or Litecoin only.\n` +
-          `🕶️ Operated by trusted hands — we're the best in the game.\n\n` +
-          `👇 Tap below to dive in or reach out to Admin if you need priority access:`,
-          userId
+        // Send welcome message using template
+        const welcomeText = await messageTranslator.translateTemplateForUser(
+          'welcome_back_message',
+          userId,
+          { firstName: firstName }
         );
 
         await bot.sendMessage(userId, welcomeText, {
@@ -103,15 +94,15 @@ export async function showCategoriesMenu(bot, userId, isWelcome = true) {
           reply_markup: {
             inline_keyboard: [
               [{ 
-                text: await messageTranslator.translateForUser('🛍️ Browse Categories', userId), 
+                text: await messageTranslator.translateTemplateForUser('browse_categories_button', userId), 
                 callback_data: 'load_categories' 
               }],
               [{ 
-                text: await messageTranslator.translateForUser('📞 Contact Admin', userId), 
+                text: await messageTranslator.translateTemplateForUser('contact_admin', userId), 
                 url: 'https://t.me/nova_chok' 
               }],
               [{ 
-                text: await messageTranslator.translateForUser('🌍 Change Language', userId), 
+                text: await messageTranslator.translateTemplateForUser('change_language', userId), 
                 callback_data: 'change_language' 
               }]
             ]
@@ -137,7 +128,7 @@ export async function showCategoriesMenu(bot, userId, isWelcome = true) {
           
           // Translate category names and create buttons
           for (const row of rows) {
-            const translatedName = await translationService.translate(row.name, userLang);
+            const translatedName = await instantTranslationService.getTranslation(row.name, userId);
             buttons.push([{
               text: `📂 ${translatedName}`,
               callback_data: `cat_${row.id}`
@@ -147,19 +138,19 @@ export async function showCategoriesMenu(bot, userId, isWelcome = true) {
           // Add admin contact and language change buttons
           buttons.push([
             { 
-              text: await messageTranslator.translateForUser('📞 Contact Admin', userId), 
+              text: await messageTranslator.translateTemplateForUser('contact_admin', userId), 
               url: 'https://t.me/nova_chok' 
             }
           ]);
           
           buttons.push([
             { 
-              text: await messageTranslator.translateForUser('🌍 Change Language', userId), 
+              text: await messageTranslator.translateTemplateForUser('change_language', userId), 
               callback_data: 'change_language' 
             }
           ]);
 
-          const categoryMessage = await messageTranslator.translateForUser('select_category', userId);
+          const categoryMessage = await messageTranslator.translateTemplateForUser('select_category', userId);
           
           bot.sendMessage(userId, `🛍️ ${categoryMessage}`, {
             parse_mode: 'Markdown',
@@ -204,8 +195,8 @@ export async function handleLanguageSelection(bot, query) {
     });
     
     const langInfo = translationService.getSupportedLanguages()[languageCode];
-    const successMessage = await messageTranslator.translateForUser(
-      `language_updated`, 
+    const successMessage = await messageTranslator.translateTemplateForUser(
+      'language_updated', 
       userId, 
       { language: langInfo?.name || languageCode }
     );
@@ -217,7 +208,7 @@ export async function handleLanguageSelection(bot, query) {
 
     // Update the message to show categories
     await bot.editMessageText(
-      await messageTranslator.translateForUser('Language updated! Loading categories...', userId),
+      await messageTranslator.translateTemplateForUser('language_updated_loading', userId),
       {
         chat_id: message.chat.id,
         message_id: message.message_id,
@@ -235,7 +226,7 @@ export async function handleLanguageSelection(bot, query) {
   } catch (error) {
     console.error('[Language Selection Error]', error);
     await bot.answerCallbackQuery(query.id, {
-      text: await messageTranslator.translateForUser('language_error', userId),
+      text: await messageTranslator.translateTemplateForUser('language_error', userId),
       show_alert: true
     });
     return true;

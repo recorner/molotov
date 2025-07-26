@@ -37,6 +37,9 @@ import { handleAdminPaymentAction, handleProductDelivery } from './handlers/paym
 // Translation Services
 import translationService from './utils/translationService.js';
 import messageTranslator from './utils/messageTranslator.js';
+import instantTranslationService from './utils/instantTranslationService.js';
+import redisTranslationCache from './utils/redisTranslationCache.js';
+import prebuiltTranslations from './utils/prebuiltTranslations.js';
 import TelegramSafety from './utils/telegramSafety.js';
 
 // Sidekick System Imports
@@ -80,6 +83,27 @@ let sidekickInputHandler = null;
 async function initializeBot() {
   try {
     logger.info('SYSTEM', 'Starting Molotov Bot initialization...');
+    
+    // Initialize instant translation service with Redis cache
+    logger.info('SYSTEM', 'Initializing instant translation service...');
+    await instantTranslationService.initialize();
+    await messageTranslator.initialize();
+    
+    // Load pre-built translations into Redis for instant response
+    logger.info('SYSTEM', 'Loading pre-built translations into Redis cache...');
+    const translationsLoaded = await prebuiltTranslations.loadTranslations();
+    if (translationsLoaded) {
+      const translationsData = prebuiltTranslations.getAllTranslations();
+      if (translationsData && Object.keys(translationsData).length > 0) {
+        await instantTranslationService.preloadTranslationsToRedis(translationsData);
+        logger.info('SYSTEM', 'Pre-built translations loaded into Redis for instant response');
+      }
+      
+      const stats = prebuiltTranslations.getStats();
+      logger.info('SYSTEM', `Translation system ready: ${stats.cacheSize} entries loaded`);
+    } else {
+      logger.warn('SYSTEM', 'Pre-built translations not available, using live translation with Redis cache');
+    }
     
     // Run database migrations for backward compatibility
     logger.info('SYSTEM', 'Running database migrations...');
