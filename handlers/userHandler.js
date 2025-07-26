@@ -51,17 +51,7 @@ export function handleStart(bot, msg) {
               console.error('[DB] User insert error:', err.message);
               return;
             }
-
-            const joinedAt = new Date().toLocaleString();
-            const intro = 
-              `🎉 *New User Joined!*\n\n` +
-              `👤 Name: ${first_name} ${last_name || ''}\n` +
-              `🔗 Username: @${username}\n` +
-              `🆔 Telegram ID: ${userId}\n` +
-              `🌐 Language: ${language_code || 'en'}\n` +
-              `🕒 Time: ${joinedAt}`;
-
-            notifyGroup(bot, intro, { parse_mode: 'Markdown' });
+            // Note: User notification will be sent after language selection
           }
         );
 
@@ -195,6 +185,23 @@ export async function handleLanguageSelection(bot, query) {
   
   try {
     await translationService.setUserLanguage(userId, languageCode);
+    
+    // Send user joined notification after language selection
+    db.get('SELECT first_name, last_name, username FROM users WHERE telegram_id = ?', [userId], (err, user) => {
+      if (!err && user) {
+        const joinedAt = new Date().toLocaleString();
+        const langInfo = translationService.getSupportedLanguages()[languageCode];
+        const intro = 
+          `🎉 *New User Joined!*\n\n` +
+          `👤 Name: ${user.first_name} ${user.last_name || ''}\n` +
+          `🔗 Username: [@${user.username}](https://t.me/${user.username})\n` +
+          `🆔 Telegram ID: \`${userId}\`\n` +
+          `🌐 Language: ${langInfo?.flag || '🌍'} ${langInfo?.name || languageCode}\n` +
+          `🕒 Time: ${joinedAt}`;
+
+        notifyGroup(bot, intro, { parse_mode: 'Markdown' });
+      }
+    });
     
     const langInfo = translationService.getSupportedLanguages()[languageCode];
     const successMessage = await messageTranslator.translateForUser(

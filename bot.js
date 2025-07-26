@@ -3,6 +3,22 @@ import TelegramBot from 'node-telegram-bot-api';
 import { BOT_TOKEN, ADMIN_GROUP, ADMIN_IDS } from './config.js';
 import './database.js'; // Load and initialize DB
 
+// Global error handlers
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[UNHANDLED REJECTION]', {
+    reason: reason?.message || reason,
+    stack: reason?.stack,
+    promise: promise
+  });
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('[UNCAUGHT EXCEPTION]', {
+    message: error.message,
+    stack: error.stack
+  });
+});
+
 // Core utilities
 import logger from './utils/logger.js';
 import stateManager from './utils/stateManager.js';
@@ -422,7 +438,12 @@ bot.on('callback_query', async (query) => {
     return await messageTranslator.answerTranslatedCallback(bot, query.id, 'unknown_action', userId);
 
   } catch (err) {
-    console.error('[Callback Error]', err);
+    console.error('[Callback Error]', {
+      userId: userId,
+      data: data,
+      error: err.message,
+      stack: err.stack
+    });
     return await messageTranslator.answerTranslatedCallback(bot, query.id, 'error_processing', userId);
   }
 });

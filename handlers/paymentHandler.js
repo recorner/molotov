@@ -2,6 +2,8 @@
 import db from '../database.js';
 import { BTC_ADDRESS, LTC_ADDRESS } from '../config.js';
 import { notifyGroup } from '../utils/notifyGroup.js';
+import messageTranslator from '../utils/messageTranslator.js';
+import translationService from '../utils/translationService.js';
 
 export async function handleBuyCallback(bot, query) {
   const { data, from } = query;
@@ -10,30 +12,55 @@ export async function handleBuyCallback(bot, query) {
 
   const productId = parseInt(data.split('_')[1]);
 
-  db.get(`SELECT * FROM products WHERE id = ?`, [productId], (err, product) => {
-    if (err || !product) {
-      return bot.answerCallbackQuery(query.id, { text: '❌ Product not found.' });
+  try {
+    // Promisify database operation
+    const product = await new Promise((resolve, reject) => {
+      db.get(`SELECT * FROM products WHERE id = ?`, [productId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!product) {
+      const errorMsg = await messageTranslator.translateForUser('error_loading', from.id);
+      return bot.answerCallbackQuery(query.id, { text: errorMsg });
     }
 
-    const text = `🛍️ **Order Summary**\n\n` +
-      `🛒 **Product:** ${product.name}\n` +
-      `💰 **Price:** $${product.price}\n` +
-      `📝 **Description:** ${product.description || 'No description available'}\n` +
-      `⏰ **Date:** ${new Date().toLocaleString()}\n\n` +
+    const orderSummaryTitle = await messageTranslator.translateTemplate('order_summary', await translationService.getUserLanguage(from.id));
+    const productLabel = await messageTranslator.translateTemplate('product_label', await translationService.getUserLanguage(from.id));
+    const priceLabel = await messageTranslator.translateTemplate('price_label', await translationService.getUserLanguage(from.id));
+    const descriptionLabel = await messageTranslator.translateTemplate('description_label', await translationService.getUserLanguage(from.id));
+    const dateLabel = await messageTranslator.translateTemplate('date_label', await translationService.getUserLanguage(from.id));
+    const paymentOptionsTitle = await messageTranslator.translateTemplate('payment_options', await translationService.getUserLanguage(from.id));
+    const choosePaymentMethod = await messageTranslator.translateTemplate('choose_payment_method', await translationService.getUserLanguage(from.id));
+    
+    const noDescription = await messageTranslator.translateTemplate('no_description', await translationService.getUserLanguage(from.id));
+
+    const text = `🛍️ **${orderSummaryTitle}**\n\n` +
+      `🛒 **${productLabel}:** ${product.name}\n` +
+      `💰 **${priceLabel}:** $${product.price}\n` +
+      `📝 **${descriptionLabel}:** ${product.description || noDescription}\n` +
+      `⏰ **${dateLabel}:** ${new Date().toLocaleString()}\n\n` +
       `━━━━━━━━━━━━━━━━━━━━━\n` +
-      `🔐 **Secure Payment Options**\n` +
-      `Choose your preferred cryptocurrency:`;
+      `🔐 **${paymentOptionsTitle}**\n` +
+      `${choosePaymentMethod}`;
+
+    const bitcoinText = await messageTranslator.translateTemplate('bitcoin_payment', await translationService.getUserLanguage(from.id));
+    const litecoinText = await messageTranslator.translateTemplate('litecoin_payment', await translationService.getUserLanguage(from.id));
+    const paymentGuideText = await messageTranslator.translateTemplate('payment_guide', await translationService.getUserLanguage(from.id));
+    const cancelOrderText = await messageTranslator.translateTemplate('cancel_order', await translationService.getUserLanguage(from.id));
+    const backToProductsText = await messageTranslator.translateTemplate('back_to_products', await translationService.getUserLanguage(from.id));
 
     const buttons = [
       [
-        { text: '₿ Bitcoin (BTC)', callback_data: `pay_btc_${product.id}` },
-        { text: '🪙 Litecoin (LTC)', callback_data: `pay_ltc_${product.id}` }
+        { text: `₿ ${bitcoinText}`, callback_data: `pay_btc_${product.id}` },
+        { text: `🪙 ${litecoinText}`, callback_data: `pay_ltc_${product.id}` }
       ],
       [
-        { text: '💡 Payment Guide', callback_data: `guide_${product.id}` },
-        { text: '❌ Cancel Order', callback_data: `cancel_order_${product.id}` }
+        { text: `💡 ${paymentGuideText}`, callback_data: `guide_${product.id}` },
+        { text: `❌ ${cancelOrderText}`, callback_data: `cancel_order_${product.id}` }
       ],
-      [{ text: '🔙 Back to Products', callback_data: 'load_categories' }]
+      [{ text: `🔙 ${backToProductsText}`, callback_data: 'load_categories' }]
     ];
 
     bot.editMessageText(text, {
@@ -42,7 +69,12 @@ export async function handleBuyCallback(bot, query) {
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: buttons }
     });
-  });
+
+  } catch (error) {
+    console.error('[Buy Callback Error]', error);
+    const errorMsg = await messageTranslator.translateForUser('error_processing', from.id);
+    bot.answerCallbackQuery(query.id, { text: errorMsg });
+  }
 }
 
 export async function handlePaymentSelection(bot, query) {
@@ -51,93 +83,131 @@ export async function handlePaymentSelection(bot, query) {
 
   const [_, currency, productId] = data.split('_');
 
-  db.get(`SELECT * FROM products WHERE id = ?`, [productId], (err, product) => {
-    if (err || !product) {
-      return bot.answerCallbackQuery(query.id, { text: '❌ Product not found.' });
+  try {
+    // Promisify database operations
+    const product = await new Promise((resolve, reject) => {
+      db.get(`SELECT * FROM products WHERE id = ?`, [productId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!product) {
+      const errorMsg = await messageTranslator.translateForUser('error_loading', from.id);
+      return bot.answerCallbackQuery(query.id, { text: errorMsg });
     }
 
-    // First try getting address from DB
-    db.get(`
-      SELECT address FROM wallet_addresses 
-      WHERE currency = ? 
-      ORDER BY added_at DESC LIMIT 1
-    `, [currency.toUpperCase()], (dbErr, row) => {
-      if (dbErr) {
-        console.error('[DB] Wallet fetch error:', dbErr.message);
-        return bot.answerCallbackQuery(query.id, { text: '❌ DB Error fetching wallet' });
-      }
+    // Get wallet address
+    const row = await new Promise((resolve, reject) => {
+      db.get(`
+        SELECT address FROM wallet_addresses 
+        WHERE currency = ? 
+        ORDER BY added_at DESC LIMIT 1
+      `, [currency.toUpperCase()], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
 
-      const fallbackAddress = currency === 'btc' ? BTC_ADDRESS : LTC_ADDRESS;
-      const address = row?.address || fallbackAddress;
-      const price = product.price;
+    const fallbackAddress = currency === 'btc' ? BTC_ADDRESS : LTC_ADDRESS;
+    const address = row?.address || fallbackAddress;
+    const price = product.price;
 
+    // Insert order
+    const orderId = await new Promise((resolve, reject) => {
       db.run(`
         INSERT INTO orders (user_id, product_id, price, currency)
         VALUES (?, ?, ?, ?)`,
         [from.id, product.id, price, currency.toUpperCase()],
-        function (insertErr) {
-          if (insertErr) {
-            console.error('[DB] Order Insert Error:', insertErr.message);
-            return bot.answerCallbackQuery(query.id, { text: '❌ Error creating order.' });
-          }
-
-          const orderId = this.lastID;
-
-          const adminMsg = `📢 **New Payment Initiated**\n\n` +
-            `🧾 **Order ID:** #${orderId}\n` +
-            `👤 **Customer:** [${from.first_name}](tg://user?id=${from.id}) (${from.username ? '@' + from.username : 'No username'})\n` +
-            `🛍️ **Product:** ${product.name}\n` +
-            `💵 **Amount:** $${price} (${currency.toUpperCase()})\n` +
-            `🏦 **Address:** \`${address}\`\n` +
-            `⏰ **Time:** ${new Date().toLocaleString()}\n\n` +
-            `🔔 **Waiting for customer payment confirmation...**`;
-
-          notifyGroup(bot, adminMsg, { parse_mode: 'Markdown' });
-
-          const currencyEmoji = currency === 'btc' ? '₿' : '🪙';
-          const currencyName = currency === 'btc' ? 'Bitcoin' : 'Litecoin';
-          
-          const msg = `💳 **Payment Instructions**\n\n` +
-            `🧾 **Order ID:** #${orderId}\n` +
-            `🛍️ **Product:** ${product.name}\n` +
-            `💰 **Amount:** $${price}\n` +
-            `${currencyEmoji} **Currency:** ${currencyName} (${currency.toUpperCase()})\n\n` +
-            `━━━━━━━━━━━━━━━━━━━━━\n` +
-            `📬 **Send Payment To:**\n` +
-            `\`${address}\`\n\n` +
-            `⚠️ **Important:**\n` +
-            `• Send exactly $${price} worth of ${currency.toUpperCase()}\n` +
-            `• Double-check the address above\n` +
-            `• Payment may take 10-60 minutes to confirm\n` +
-            `• Keep your transaction ID for reference\n\n` +
-            `━━━━━━━━━━━━━━━━━━━━━\n` +
-            `**After sending payment, click the button below:**`;
-
-          const paymentButtons = [
-            [
-              { text: '✅ I\'ve Sent Payment', callback_data: `confirm_${orderId}` },
-              { text: '📋 Copy Address', callback_data: `copy_address_${address}` }
-            ],
-            [
-              { text: '💡 Payment Help', callback_data: `help_payment_${currency}` },
-              { text: '🔄 Refresh Status', callback_data: `status_${orderId}` }
-            ],
-            [
-              { text: '❌ Cancel Order', callback_data: `cancel_order_${orderId}` },
-              { text: '🔙 Back to Store', callback_data: 'load_categories' }
-            ]
-          ];
-
-          bot.editMessageText(msg, {
-            chat_id: query.message.chat.id,
-            message_id: query.message.message_id,
-            parse_mode: 'Markdown',
-            reply_markup: { inline_keyboard: paymentButtons }
-          });
+        function (err) {
+          if (err) reject(err);
+          else resolve(this.lastID);
         }
       );
     });
-  });
+
+    // Send admin notification
+    const adminMsg = `📢 **New Payment Initiated**\n\n` +
+      `🧾 **Order ID:** #${orderId}\n` +
+      `👤 **Customer:** [${from.first_name}](tg://user?id=${from.id}) (${from.username ? '@' + from.username : 'No username'})\n` +
+      `🛍️ **Product:** ${product.name}\n` +
+      `💵 **Amount:** $${price} (${currency.toUpperCase()})\n` +
+      `🏦 **Address:** \`${address}\`\n` +
+      `⏰ **Time:** ${new Date().toLocaleString()}\n\n` +
+      `🔔 **Waiting for customer payment confirmation...**`;
+
+    notifyGroup(bot, adminMsg, { parse_mode: 'Markdown' });
+
+    const currencyEmoji = currency === 'btc' ? '₿' : '🪙';
+    const currencyName = currency === 'btc' ? 'Bitcoin' : 'Litecoin';
+    
+    const userLang = await translationService.getUserLanguage(from.id);
+    
+    // Get translations for payment instructions
+    const paymentInstructions = await messageTranslator.translateTemplate('payment_instructions', userLang);
+    const orderIdLabel = await messageTranslator.translateTemplate('order_id', userLang);
+    const productLabel = await messageTranslator.translateTemplate('product_label', userLang);
+    const amountLabel = await messageTranslator.translateTemplate('amount_label', userLang);
+    const currencyLabel = await messageTranslator.translateTemplate('currency_label', userLang);
+    const sendPaymentTo = await messageTranslator.translateTemplate('send_payment_to', userLang);
+    const importantLabel = await messageTranslator.translateTemplate('important_label', userLang);
+    const sendExactly = await messageTranslator.translateTemplate('send_exactly', userLang);
+    const doubleCheck = await messageTranslator.translateTemplate('double_check_address', userLang);
+    const confirmTime = await messageTranslator.translateTemplate('confirmation_time', userLang);
+    const keepTxId = await messageTranslator.translateTemplate('keep_transaction_id', userLang);
+    const afterSending = await messageTranslator.translateTemplate('after_sending_payment', userLang);
+    
+    const msg = `💳 **${paymentInstructions}**\n\n` +
+      `🧾 **${orderIdLabel}:** #${orderId}\n` +
+      `🛍️ **${productLabel}:** ${product.name}\n` +
+      `💰 **${amountLabel}:** $${price}\n` +
+      `${currencyEmoji} **${currencyLabel}:** ${currencyName} (${currency.toUpperCase()})\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📬 **${sendPaymentTo}:**\n` +
+      `\`${address}\`\n\n` +
+      `⚠️ **${importantLabel}:**\n` +
+      `• ${sendExactly.replace('{amount}', '$' + price).replace('{currency}', currency.toUpperCase())}\n` +
+      `• ${doubleCheck}\n` +
+      `• ${confirmTime}\n` +
+      `• ${keepTxId}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `**${afterSending}:**`;
+
+    // Get button translations
+    const sentPayment = await messageTranslator.translateTemplate('sent_payment', userLang);
+    const copyAddress = await messageTranslator.translateTemplate('copy_address', userLang);
+    const paymentHelp = await messageTranslator.translateTemplate('payment_help', userLang);
+    const refreshStatus = await messageTranslator.translateTemplate('refresh_status', userLang);
+    const cancelOrder = await messageTranslator.translateTemplate('cancel_order', userLang);
+    const backToStore = await messageTranslator.translateTemplate('back_to_store', userLang);
+
+    const paymentButtons = [
+      [
+        { text: `✅ ${sentPayment}`, callback_data: `confirm_${orderId}` },
+        { text: `📋 ${copyAddress}`, callback_data: `copy_address_${address}` }
+      ],
+      [
+        { text: `💡 ${paymentHelp}`, callback_data: `help_payment_${currency}` },
+        { text: `🔄 ${refreshStatus}`, callback_data: `status_${orderId}` }
+      ],
+      [
+        { text: `❌ ${cancelOrder}`, callback_data: `cancel_order_${orderId}` },
+        { text: `🔙 ${backToStore}`, callback_data: 'load_categories' }
+      ]
+    ];
+
+    bot.editMessageText(msg, {
+      chat_id: query.message.chat.id,
+      message_id: query.message.message_id,
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: paymentButtons }
+    });
+
+  } catch (error) {
+    console.error('[Payment Selection Error]', error);
+    const errorMsg = await messageTranslator.translateForUser('error_processing', from.id);
+    bot.answerCallbackQuery(query.id, { text: errorMsg });
+  }
 }
 
 export async function handlePaymentConfirmation(bot, query) {
