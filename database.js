@@ -174,7 +174,8 @@ db.serialize(() => {
       last_name TEXT,
       username TEXT,
       language_code TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
 });
@@ -326,6 +327,168 @@ db.serialize(() => {
       console.error('[DB] Security log table error:', err);
     } else {
       console.log('[DB] Security audit log ready.');
+    }
+  });
+});
+
+// === Admin Groups Table ===
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS admin_groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id INTEGER UNIQUE NOT NULL,
+      group_name TEXT,
+      added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      is_active BOOLEAN DEFAULT 1
+    )
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Admin groups table error:', err);
+    } else {
+      console.log('[DB] Admin groups table ready.');
+    }
+  });
+});
+
+// === Group Admins Table ===
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS group_admins (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      username TEXT,
+      first_name TEXT,
+      status TEXT DEFAULT 'administrator',
+      added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(group_id, user_id),
+      FOREIGN KEY (group_id) REFERENCES admin_groups(group_id)
+    )
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Group admins table error:', err);
+    } else {
+      console.log('[DB] Group admins table ready.');
+    }
+  });
+});
+
+// === News and Announcements Table ===
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS news_announcements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      target_languages TEXT NOT NULL, -- JSON array of language codes
+      created_by INTEGER NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      scheduled_at TIMESTAMP,
+      sent_at TIMESTAMP,
+      status TEXT DEFAULT 'draft', -- draft, scheduled, sending, sent, failed
+      recipients_count INTEGER DEFAULT 0,
+      success_count INTEGER DEFAULT 0,
+      failed_count INTEGER DEFAULT 0,
+      FOREIGN KEY (created_by) REFERENCES group_admins(user_id)
+    )
+  `, (err) => {
+    if (err) {
+      console.error('[DB] News announcements table error:', err);
+    } else {
+      console.log('[DB] News announcements table ready.');
+    }
+  });
+});
+
+// === News Delivery Log Table ===
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS news_delivery_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      news_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      telegram_id INTEGER NOT NULL,
+      language_code TEXT,
+      status TEXT NOT NULL, -- sent, failed, skipped
+      error_message TEXT,
+      sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (news_id) REFERENCES news_announcements(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `, (err) => {
+    if (err) {
+      console.error('[DB] News delivery log table error:', err);
+    } else {
+      console.log('[DB] News delivery log table ready.');
+    }
+  });
+});
+
+// === News and Announcements Table ===
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS news_announcements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      target_languages TEXT NOT NULL, -- JSON array of language codes
+      created_by INTEGER NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      scheduled_at TIMESTAMP,
+      sent_at TIMESTAMP,
+      status TEXT DEFAULT 'draft', -- draft, scheduled, sending, sent, failed
+      recipients_count INTEGER DEFAULT 0,
+      success_count INTEGER DEFAULT 0,
+      failed_count INTEGER DEFAULT 0,
+      FOREIGN KEY (created_by) REFERENCES group_admins(user_id)
+    )
+  `, (err) => {
+    if (err) {
+      console.error('[DB] News announcements table error:', err);
+    } else {
+      console.log('[DB] News announcements table ready.');
+    }
+  });
+});
+
+// === News Recipients Table ===
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS news_recipients (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      announcement_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      status TEXT DEFAULT 'pending', -- pending, sent, failed
+      sent_at TIMESTAMP,
+      error_message TEXT,
+      FOREIGN KEY (announcement_id) REFERENCES news_announcements(id),
+      FOREIGN KEY (user_id) REFERENCES users(telegram_id)
+    )
+  `, (err) => {
+    if (err) {
+      console.error('[DB] News recipients table error:', err);
+    } else {
+      console.log('[DB] News recipients table ready.');
+    }
+  });
+
+  // News delivery log table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS news_delivery_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      announcement_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      error_message TEXT,
+      delivered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (announcement_id) REFERENCES news_announcements(id)
+    )
+  `, (err) => {
+    if (err) {
+      console.error('[DB] News delivery log table error:', err);
+    } else {
+      console.log('[DB] News delivery log table ready.');
     }
   });
 });

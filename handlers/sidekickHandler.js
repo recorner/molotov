@@ -1,8 +1,9 @@
 // sidekickHandler.js - Advanced onchain transaction management system
 import db from '../database.js';
-import { ADMIN_IDS, ADMIN_GROUP } from '../config.js';
+import { ADMIN_GROUP } from '../config.js';
 import { formatTimeAgo } from '../utils/date.js';
 import SidekickInputHandler from '../utils/sidekickInputHandler.js';
+import adminManager from '../utils/adminManager.js';
 import crypto from 'crypto';
 
 const activeSidekickSessions = {};
@@ -21,8 +22,9 @@ export async function handleSidekickCallback(bot, query) {
   const data = query.data;
   const userId = query.from.id;
 
-  // Check admin permissions
-  if (!ADMIN_IDS.includes(userId)) {
+  // Check admin permissions with dynamic admin manager
+  const isUserAdmin = await adminManager.isAdmin(userId);
+  if (!isUserAdmin) {
     return bot.answerCallbackQuery(query.id, { text: '❌ Access denied' });
   }
 

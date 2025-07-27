@@ -1,6 +1,6 @@
-// sidekickInputHandler.js - Handles text input for sidekick operations
+// sidekickInputHandler.js - Enhanced transaction input handling
 import db from '../database.js';
-import { ADMIN_IDS } from '../config.js';
+import adminManager from './adminManager.js';
 import TransactionManager from './transactionManager.js';
 import PinManager from './pinManager.js';
 
@@ -19,8 +19,9 @@ class SidekickInputHandler {
     const userId = msg.from.id;
     const text = msg.text?.trim();
 
-    // Validate user permissions
-    if (!ADMIN_IDS.includes(userId)) return false;
+    // Validate user permissions with dynamic admin manager
+    const isUserAdmin = await adminManager.isAdmin(userId);
+    if (!isUserAdmin) return false;
 
     // Validate input exists
     if (!text || text.length === 0) {

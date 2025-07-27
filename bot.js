@@ -1,6 +1,6 @@
 // bot.js - Main bot file with production-grade features
 import TelegramBot from 'node-telegram-bot-api';
-import { BOT_TOKEN, ADMIN_GROUP, ADMIN_IDS } from './config.js';
+import { BOT_TOKEN, ADMIN_GROUP } from './config.js';
 import './database.js'; // Load and initialize DB
 
 // Global error handlers
@@ -61,6 +61,8 @@ import {
 } from './handlers/paymentHandler.js';
 import { handleAdminCommand } from './handlers/adminHandler.js';
 import { handleAdminCallback } from './handlers/adminHandler.js';
+import { handleNewsCommand } from './handlers/newsHandler.js';
+import adminManager from './utils/adminManager.js';
 
 // Initialize bot with production settings
 const bot = new TelegramBot(BOT_TOKEN, { 
@@ -75,6 +77,9 @@ const bot = new TelegramBot(BOT_TOKEN, {
 
 // Apply telegram safety patches immediately after bot creation
 TelegramSafety.patchBot(bot);
+
+// Make bot instance available globally for broadcasting
+global.botInstance = bot;
 
 // Global instances
 let sidekickInputHandler = null;
@@ -123,6 +128,15 @@ async function initializeBot() {
     // Start blockchain monitoring
     await blockchainMonitor.startMonitoring();
     logger.info('BLOCKCHAIN', 'Blockchain monitoring started');
+    
+    // Initialize dynamic admin system
+    if (ADMIN_GROUP) {
+      logger.info('ADMIN', 'Initializing dynamic admin system...');
+      const adminCount = await adminManager.initializeAdminSystem(bot, [ADMIN_GROUP]);
+      logger.info('ADMIN', `Dynamic admin system initialized with ${adminCount} admins`);
+    } else {
+      logger.warn('ADMIN', 'No ADMIN_GROUP configured. Admin system will use empty group list.');
+    }
     
     // System health monitoring
     setInterval(() => {
@@ -324,9 +338,14 @@ bot.onText(/^\/(addcategory|addsubcategory|addproduct)(.*)/, (msg) => {
   handleAdminCommand(bot, msg);
 });
 bot.onText(/\/cocktail/, (msg) => handleAdminCommand(bot, msg));
-bot.onText(/\/sidekick/, (msg) => {
-  // Quick access to sidekick
-  if (ADMIN_IDS.includes(msg.from.id)) {
+
+// News and announcements command (restricted to admins)
+bot.onText(/\/news/, (msg) => handleNewsCommand(bot, msg));
+
+bot.onText(/\/sidekick/, async (msg) => {
+  // Quick access to sidekick - use dynamic admin check
+  const isUserAdmin = await adminManager.isAdmin(msg.from.id);
+  if (isUserAdmin) {
     bot.sendMessage(msg.chat.id, '🚀 *Sidekick System*\n\nAccessing transaction management...', {
       parse_mode: 'Markdown',
       reply_markup: {
@@ -459,9 +478,27 @@ bot.on('callback_query', async (query) => {
     // Admin panel routing
     if (
       data.startsWith('panel_') ||
-      data === 'cocktail_back'
+      data === 'cocktail_back' ||
+      data.startsWith('admin_')
     ) {
       return handleAdminCallback(bot, query);
+    }
+
+    // News and announcements routing
+    if (
+      data.startsWith('news_') ||
+      data === 'news_main'
+    ) {
+      const { handleNewsCallback } = await import('./handlers/newsHandler.js');
+      return handleNewsCallback(bot, query);
+    }
+
+    // News and announcements routing
+    if (
+      data.startsWith('news_') ||
+      data === 'news_main'
+    ) {
+      return handleNewsCallback(bot, query);
     }
     //wallet prompt
     if (data.startsWith('walletcheck_')) {
@@ -540,6 +577,10 @@ bot.on('message', async (msg) => {
         const sidekickHandled = await sidekickInputHandler.handleInput(msg);
         if (sidekickHandled) return;
       }
+
+      // Check for news message input
+      const { handleNewsMessageInput } = await import('./handlers/newsHandler.js');
+      await handleNewsMessageInput(bot, msg);
 
       // Then check for wallet input
       await handleWalletInput(bot, msg);

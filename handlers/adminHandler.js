@@ -1,15 +1,19 @@
 import db from '../database.js';
-import { ADMIN_IDS, ADMIN_GROUP } from '../config.js';
+import { ADMIN_GROUP } from '../config.js';
 import { formatTimeAgo } from '../utils/date.js';
 import languageStatsManager from '../utils/languageStats.js';
 import logger from '../utils/logger.js';
 import { notifyGroup } from '../utils/notifyGroup.js';
+import adminManager from '../utils/adminManager.js';
+import vouchChannelManager from '../utils/vouchChannel.js';
 
 // === Handle /cocktail Command ===
-export function handleAdminCommand(bot, msg) {
+export async function handleAdminCommand(bot, msg) {
   const { from } = msg;
 
-  if (!ADMIN_IDS.includes(from.id)) {
+  // Use dynamic admin check instead of hardcoded ADMIN_IDS
+  const isUserAdmin = await adminManager.isAdmin(from.id);
+  if (!isUserAdmin) {
     return bot.sendMessage(msg.chat.id, '⛔ *Unauthorized Access*\n\nThis command is restricted to administrators only.', {
       parse_mode: 'Markdown'
     });
@@ -40,25 +44,32 @@ export function handleAdminCommand(bot, msg) {
         ],
         [
           { text: '📦 Order Management', callback_data: 'panel_orders' },
-          { text: '⚙️ System Control', callback_data: 'panel_system' }
+          { text: '📢 News & Announcements', callback_data: 'panel_news' }
         ],
         [
-          { text: '🖥️ Cloud Shell', callback_data: 'panel_shell' },
-          { text: '🏠 Go to Lobby', url: `https://t.me/+g1nH977AIqhkNjBk` }
-        ]
+          { text: '✅ Vouch Channel', callback_data: 'panel_vouch' },
+          { text: '👑 Admin Management', callback_data: 'panel_admin_mgmt' }
+        ],
+        [
+          { text: '⚙️ System Control', callback_data: 'panel_system' },
+          { text: '🖥️ Cloud Shell', callback_data: 'panel_shell' }
+        ],
+        [{ text: '🏠 Go to Lobby', url: `https://t.me/+g1nH977AIqhkNjBk` }]
       ]
     }
   });
 }
 
 // === Handle Admin Panel Callbacks ===
-export function handleAdminCallback(bot, query) {
+export async function handleAdminCallback(bot, query) {
   const { id: userId } = query.from;
   const chatId = query.message.chat.id;
   const messageId = query.message.message_id;
   const data = query.data;
 
-  if (!ADMIN_IDS.includes(userId)) {
+  // Use dynamic admin check instead of hardcoded ADMIN_IDS
+  const isUserAdmin = await adminManager.isAdmin(userId);
+  if (!isUserAdmin) {
     logger.warn('ADMIN', `Unauthorized admin panel access attempt by user ${userId}`);
     return bot.answerCallbackQuery(query.id, { 
       text: '⛔ Unauthorized access. This incident has been logged.', 
@@ -158,6 +169,55 @@ export function handleAdminCallback(bot, query) {
       });
     });
     return;
+  }
+
+  // === Submenu: News & Announcements ===
+  if (data === 'panel_news') {
+    return bot.editMessageText(`📢 **News & Announcements Panel**\n\n` +
+      `🎯 Language-targeted broadcasting system\n` +
+      `📊 Selective user notification management\n` +
+      `🌍 Multi-language announcement support\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📈 **Quick Overview:**\n` +
+      `• Target users by their selected language\n` +
+      `• Schedule announcements for optimal timing\n` +
+      `• Track delivery rates and engagement\n` +
+      `• Maintain announcement history\n\n` +
+      `Choose an action:`, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '📝 Create Announcement', callback_data: 'news_create' },
+            { text: '📋 View Drafts', callback_data: 'news_drafts' }
+          ],
+          [
+            { text: '📤 Scheduled Messages', callback_data: 'news_scheduled' },
+            { text: '📊 Message History', callback_data: 'news_history' }
+          ],
+          [
+            { text: '🌍 Language Statistics', callback_data: 'news_lang_stats' },
+            { text: '👥 User Segments', callback_data: 'news_segments' }
+          ],
+          [
+            { text: '⚙️ Broadcast Settings', callback_data: 'news_settings' },
+            { text: '🔙 Back to Admin Panel', callback_data: 'cocktail_back' }
+          ]
+        ]
+      }
+    });
+  }
+
+  // === Admin Management Panel ===
+  if (data === 'panel_admin_mgmt') {
+    return showAdminManagementPanel(bot, chatId, messageId);
+  }
+
+  // === Vouch Channel Management Panel ===
+  if (data === 'panel_vouch') {
+    return showVouchChannelPanel(bot, chatId, messageId);
   }
 
   // === Submenu: List Active Wallets ===
@@ -410,6 +470,80 @@ export function handleAdminCallback(bot, query) {
       
       notifyGroup(bot, enhancedReport, { parse_mode: 'Markdown' });
     });
+    return;
+  }
+
+  // === Vouch Channel Actions ===
+  if (data === 'vouch_test') {
+    bot.answerCallbackQuery(query.id, { 
+      text: '🧪 Testing vouch channel access...', 
+      show_alert: false 
+    });
+    
+    vouchChannelManager.testChannelAccess(bot).then(success => {
+      const message = success 
+        ? '✅ Vouch channel test successful! Check the channel for test message.'
+        : '❌ Vouch channel test failed. Check channel configuration and bot permissions.';
+      
+      bot.sendMessage(chatId, message);
+    });
+    return;
+  }
+
+  if (data === 'vouch_example') {
+    const exampleMessage = `📋 **Example Vouch Message**\n\n` +
+      `This is how vouch messages will appear in your channel:\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `✅ **Order Completed Successfully**\n\n` +
+      `🧾 **Order ID:** #12345\n` +
+      `🛍️ **Product:** Premium VPN License\n` +
+      `💰 **Amount:** $29.99 ₿BTC\n` +
+      `👤 **Customer:** Customer #67890\n` +
+      `📄 **Delivery:** File\n` +
+      `🕒 **Completed:** ${new Date().toLocaleString()}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🎉 **Another satisfied customer!**\n` +
+      `⚡ **Fast & Secure Delivery**\n` +
+      `🔐 **Trusted Marketplace**\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `This example shows the clean, professional format used for all vouch posts.`;
+
+    bot.answerCallbackQuery(query.id, { text: '📋 Example shown', show_alert: false });
+    bot.sendMessage(chatId, exampleMessage, { parse_mode: 'Markdown' });
+    return;
+  }
+
+  if (data === 'vouch_setup') {
+    const setupGuide = `🔧 **Vouch Channel Setup Guide**\n\n` +
+      `**Step 1: Create Channel**\n` +
+      `• Create a new Telegram channel\n` +
+      `• Choose public or private (your preference)\n` +
+      `• Name it something like "Our Vouches" or "Success Stories"\n\n` +
+      `**Step 2: Add Bot as Admin**\n` +
+      `• Add your bot to the channel\n` +
+      `• Make it an administrator\n` +
+      `• Enable "Post Messages" permission\n\n` +
+      `**Step 3: Get Channel ID**\n` +
+      `• Forward any message from the channel to @userinfobot\n` +
+      `• Copy the channel ID (starts with -100)\n` +
+      `• Example: -1001234567890\n\n` +
+      `**Step 4: Configure Environment**\n` +
+      `• Add to your .env file:\n` +
+      `\`VOUCH_CHANNEL=-1001234567890\`\n` +
+      `• Replace with your actual channel ID\n\n` +
+      `**Step 5: Restart & Test**\n` +
+      `• Restart your bot\n` +
+      `• Use the test function in admin panel\n` +
+      `• Complete a test order to verify\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `💡 **Tips:**\n` +
+      `• Channel can be private for internal use\n` +
+      `• Public channels help with marketing\n` +
+      `• Pin your best vouch messages\n` +
+      `• Monitor channel for customer feedback`;
+
+    bot.answerCallbackQuery(query.id, { text: '📋 Setup guide sent', show_alert: false });
+    bot.sendMessage(chatId, setupGuide, { parse_mode: 'Markdown' });
     return;
   }
 
@@ -699,4 +833,213 @@ async function gatherSystemStatistics() {
       }
     });
   });
+}
+
+// === Admin Management Panel ===
+async function showAdminManagementPanel(bot, chatId, messageId) {
+  // Show loading message first
+  bot.editMessageText(`👑 **Loading Admin Management...**\n\nRetrieving admin groups and permissions...`, {
+    chat_id: chatId,
+    message_id: messageId,
+    parse_mode: 'Markdown'
+  });
+
+  try {
+    const adminGroups = await adminManager.getAdminGroups();
+    const allAdmins = await adminManager.getAllAdmins();
+
+    let text = `👑 **Admin Management Panel**\n\n`;
+    text += `🏢 **Admin Groups:** ${adminGroups.length}\n`;
+    text += `👥 **Total Admins:** ${allAdmins.length}\n`;
+    text += `🔄 **Last Updated:** ${new Date().toLocaleString()}\n\n`;
+    text += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+    if (adminGroups.length > 0) {
+      text += `🏢 **Active Admin Groups:**\n\n`;
+      adminGroups.forEach((group, index) => {
+        text += `${index + 1}. **Group ${group.group_id}**\n`;
+        text += `   📝 Name: ${group.group_name || 'Unnamed'}\n`;
+        text += `   👥 Admins: ${group.admin_count}\n`;
+        text += `   📅 Added: ${new Date(group.added_at).toLocaleDateString()}\n\n`;
+      });
+    } else {
+      text += `⚠️ **No Admin Groups Configured**\n\n`;
+      text += `💡 Add admin groups to enable dynamic admin recognition\n`;
+      text += `🔧 Use the buttons below to configure the system\n\n`;
+    }
+
+    if (allAdmins.length > 0) {
+      text += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+      text += `👥 **Recent Admins:**\n\n`;
+      allAdmins.slice(0, 5).forEach((admin, index) => {
+        text += `${index + 1}. **${admin.first_name}** ${admin.username ? `(@${admin.username})` : ''}\n`;
+        text += `   🆔 ID: \`${admin.user_id}\`\n`;
+        text += `   🏢 Groups: ${admin.group_count}\n`;
+        text += `   ⏰ Last Seen: ${new Date(admin.last_seen).toLocaleDateString()}\n\n`;
+      });
+    }
+
+    text += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    text += `🔧 **Management Tools:**\n`;
+    text += `• Add/Remove admin groups\n`;
+    text += `• Sync admins from Telegram groups\n`;
+    text += `• View detailed admin permissions\n`;
+    text += `• Audit admin activity logs`;
+
+    return bot.editMessageText(text, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '🏢 Manage Groups', callback_data: 'admin_groups' },
+            { text: '👥 Sync Admins', callback_data: 'admin_sync' }
+          ],
+          [
+            { text: '📊 Admin Analytics', callback_data: 'admin_analytics' },
+            { text: '📋 Activity Logs', callback_data: 'admin_logs' }
+          ],
+          [
+            { text: '⚙️ Settings', callback_data: 'admin_settings' },
+            { text: '🔄 Refresh', callback_data: 'panel_admin_mgmt' }
+          ],
+          [{ text: '🔙 Back to Admin Panel', callback_data: 'cocktail_back' }]
+        ]
+      }
+    });
+  } catch (error) {
+    logger.error('ADMIN', 'Failed to load admin management panel', error);
+    return bot.editMessageText(`❌ **Error Loading Admin Management**\n\n` +
+      `🔧 Failed to retrieve admin data\n` +
+      `📋 Error: \`${error.message}\`\n` +
+      `🕒 Time: ${new Date().toLocaleString()}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🔄 Please try again or check system logs`, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '🔄 Retry', callback_data: 'panel_admin_mgmt' },
+            { text: '🔙 Back', callback_data: 'cocktail_back' }
+          ]
+        ]
+      }
+    });
+  }
+}
+
+// === Vouch Channel Management Panel ===
+async function showVouchChannelPanel(bot, chatId, messageId) {
+  // Show loading message first
+  bot.editMessageText(`✅ **Loading Vouch Channel Management...**\n\nChecking channel configuration and status...`, {
+    chat_id: chatId,
+    message_id: messageId,
+    parse_mode: 'Markdown'
+  });
+
+  try {
+    const channelStatus = vouchChannelManager.getChannelStatus();
+    
+    let text = `✅ **Vouch Channel Management Panel**\n\n`;
+    
+    if (channelStatus.configured) {
+      text += `🆔 **Channel ID:** \`${channelStatus.channelId}\`\n`;
+      text += `✅ **Status:** Configured & Active\n`;
+      text += `🔄 **Auto-posting:** Enabled\n`;
+      text += `📊 **Function:** Posts when orders complete\n\n`;
+      
+      text += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+      
+      text += `🎯 **How It Works:**\n`;
+      text += `• Automatically posts when orders are delivered\n`;
+      text += `• Clean, professional vouch messages\n`;
+      text += `• Shows product, price, and completion time\n`;
+      text += `• Maintains customer privacy\n`;
+      text += `• Builds trust and credibility\n\n`;
+      
+      text += `📝 **Message Format:**\n`;
+      text += `✅ Order Completed Successfully\n`;
+      text += `🧾 Order ID: #1234\n`;
+      text += `🛍️ Product: Premium VPN License\n`;
+      text += `💰 Amount: $29.99 ₿BTC\n`;
+      text += `👤 Customer: Customer #12345\n`;
+      text += `📄 Delivery: File\n`;
+      text += `🕒 Completed: [timestamp]\n\n`;
+      
+      text += `━━━━━━━━━━━━━━━━━━━━━\n`;
+      text += `🛡️ **Privacy Protection:**\n`;
+      text += `• Customer names are anonymized\n`;
+      text += `• Only shows generic customer ID\n`;
+      text += `• No sensitive information exposed`;
+      
+    } else {
+      text += `⚠️ **Status:** Not Configured\n`;
+      text += `🔧 **Setup Required:** Add VOUCH_CHANNEL to .env\n`;
+      text += `📋 **Channel ID:** Not set\n\n`;
+      
+      text += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+      
+      text += `🔧 **Setup Instructions:**\n`;
+      text += `1. Create a Telegram channel for vouches\n`;
+      text += `2. Add the bot as admin to the channel\n`;
+      text += `3. Get the channel ID (use @userinfobot)\n`;
+      text += `4. Add VOUCH_CHANNEL=-100xxxxxxxxx to .env\n`;
+      text += `5. Restart the bot\n\n`;
+      
+      text += `💡 **Benefits:**\n`;
+      text += `• Automatic social proof generation\n`;
+      text += `• Builds customer trust\n`;
+      text += `• Professional appearance\n`;
+      text += `• Zero manual work required`;
+    }
+
+    text += `\n\n🕒 **Last Updated:** ${new Date().toLocaleString()}`;
+
+    const keyboard = [];
+    
+    if (channelStatus.configured) {
+      keyboard.push([
+        { text: '🧪 Test Channel Access', callback_data: 'vouch_test' },
+        { text: '📊 View Example', callback_data: 'vouch_example' }
+      ]);
+    }
+    
+    keyboard.push([
+      { text: '🔄 Refresh Status', callback_data: 'panel_vouch' },
+      { text: '⚙️ Setup Guide', callback_data: 'vouch_setup' }
+    ]);
+    
+    keyboard.push([{ text: '🔙 Back to Admin Panel', callback_data: 'cocktail_back' }]);
+
+    return bot.editMessageText(text, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: keyboard }
+    });
+
+  } catch (error) {
+    logger.error('ADMIN', 'Failed to load vouch channel panel', error);
+    return bot.editMessageText(`❌ **Error Loading Vouch Channel Panel**\n\n` +
+      `🔧 Failed to retrieve vouch channel status\n` +
+      `📋 Error: \`${error.message}\`\n` +
+      `🕒 Time: ${new Date().toLocaleString()}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🔄 Please try again or check system logs`, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '🔄 Retry', callback_data: 'panel_vouch' },
+            { text: '🔙 Back', callback_data: 'cocktail_back' }
+          ]
+        ]
+      }
+    });
+  }
 }

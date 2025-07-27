@@ -4,6 +4,7 @@ import { BTC_ADDRESS, LTC_ADDRESS } from '../config.js';
 import { notifyGroup, notifyNewOrder, notifyPaymentReceived } from '../utils/notifyGroup.js';
 import messageTranslator from '../utils/messageTranslator.js';
 import translationService from '../utils/translationService.js';
+import vouchChannelManager from '../utils/vouchChannel.js';
 
 export async function handleBuyCallback(bot, query) {
   const { data, from } = query;
@@ -409,6 +410,23 @@ export async function handleProductDelivery(bot, msg, orderId) {
       });
 
       console.log('[DEBUG] Order status updated to delivered');
+
+      // Post to vouch channel - Clean success message
+      try {
+        const deliveryType = fileId ? 'File' : photoId ? 'Image' : videoId ? 'Video' : 'Text';
+        await vouchChannelManager.postOrderSuccess(bot, {
+          orderId: orderId,
+          productName: order.product_name,
+          price: order.price,
+          currency: order.currency,
+          customerName: `Customer #${order.user_id}`, // Keep customer privacy
+          deliveryType: deliveryType,
+          completedAt: new Date().toLocaleString()
+        });
+      } catch (vouchError) {
+        console.error('[VOUCH ERROR] Failed to post to vouch channel:', vouchError);
+        // Don't fail the main delivery process if vouch posting fails
+      }
 
       // Notify admin of successful delivery
       const deliveryType = fileId ? 'File' : photoId ? 'Image' : videoId ? 'Video' : 'Text';
