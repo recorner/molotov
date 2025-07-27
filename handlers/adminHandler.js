@@ -498,7 +498,7 @@ export async function handleAdminCallback(bot, query) {
       `🧾 **Order ID:** #12345\n` +
       `🛍️ **Product:** Premium VPN License\n` +
       `💰 **Amount:** $29.99 ₿BTC\n` +
-      `👤 **Customer:** Customer #67890\n` +
+      `👤 **Customer:** John Smith\n` +
       `📄 **Delivery:** File\n` +
       `🕒 **Completed:** ${new Date().toLocaleString()}\n\n` +
       `━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -957,7 +957,7 @@ async function showVouchChannelPanel(bot, chatId, messageId) {
       text += `• Automatically posts when orders are delivered\n`;
       text += `• Clean, professional vouch messages\n`;
       text += `• Shows product, price, and completion time\n`;
-      text += `• Maintains customer privacy\n`;
+      text += `• Uses real customer names from Telegram profiles\n`;
       text += `• Builds trust and credibility\n\n`;
       
       text += `📝 **Message Format:**\n`;
@@ -965,15 +965,15 @@ async function showVouchChannelPanel(bot, chatId, messageId) {
       text += `🧾 Order ID: #1234\n`;
       text += `🛍️ Product: Premium VPN License\n`;
       text += `💰 Amount: $29.99 ₿BTC\n`;
-      text += `👤 Customer: Customer #12345\n`;
+      text += `👤 Customer: John Smith\n`;
       text += `📄 Delivery: File\n`;
       text += `🕒 Completed: [timestamp]\n\n`;
       
       text += `━━━━━━━━━━━━━━━━━━━━━\n`;
-      text += `🛡️ **Privacy Protection:**\n`;
-      text += `• Customer names are anonymized\n`;
-      text += `• Only shows generic customer ID\n`;
-      text += `• No sensitive information exposed`;
+      text += `🛡️ **Customer Names:**\n`;
+      text += `• Uses real names from Telegram profiles\n`;
+      text += `• Falls back to username if no real name\n`;
+      text += `• Anonymous fallback for private users`;
       
     } else {
       text += `⚠️ **Status:** Not Configured\n`;

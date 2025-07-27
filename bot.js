@@ -369,6 +369,10 @@ bot.on('callback_query', async (query) => {
   const data = query.data;
   const userId = query.from.id;
 
+  // Enhanced logging for debugging
+  console.log(`[CALLBACK] User ${userId} clicked: "${data}"`);
+  logger.info('CALLBACK', `User ${userId} executed callback: ${data}`);
+
   try {
     if (!data) {
       return await messageTranslator.answerTranslatedCallback(bot, query.id, 'Invalid callback data.', userId);
@@ -475,11 +479,11 @@ bot.on('callback_query', async (query) => {
 
 
 
-    // Admin panel routing
+    // Admin panel routing (but exclude payment actions)
     if (
       data.startsWith('panel_') ||
       data === 'cocktail_back' ||
-      data.startsWith('admin_')
+      (data.startsWith('admin_') && !data.startsWith('admin_confirm_') && !data.startsWith('admin_cancel_'))
     ) {
       return handleAdminCallback(bot, query);
     }
@@ -516,6 +520,17 @@ bot.on('callback_query', async (query) => {
     // Sidekick system callbacks
     if (data.startsWith('sidekick_')) {
       return handleSidekickCallback(bot, query);
+    }
+
+    // Handle incomplete admin actions (debugging)
+    if (data === 'admin_confirm' || data === 'admin_cancel') {
+      console.error('[ERROR] Incomplete admin action detected:', data);
+      logger.error('CALLBACK', `Incomplete admin action from user ${userId}: ${data}`);
+      
+      return bot.answerCallbackQuery(query.id, { 
+        text: '❌ This appears to be an old or corrupted payment button. Please find the latest payment notification and use those buttons.',
+        show_alert: true 
+      });
     }
 
     // Admin payment actions

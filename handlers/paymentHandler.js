@@ -5,6 +5,8 @@ import { notifyGroup, notifyNewOrder, notifyPaymentReceived } from '../utils/not
 import messageTranslator from '../utils/messageTranslator.js';
 import translationService from '../utils/translationService.js';
 import vouchChannelManager from '../utils/vouchChannel.js';
+import adminDiagnostics from '../utils/adminDiagnostics.js';
+import logger from '../utils/logger.js';
 
 export async function handleBuyCallback(bot, query) {
   const { data, from } = query;
@@ -256,11 +258,26 @@ export async function handlePaymentConfirmation(bot, query) {
 
 export async function handleAdminPaymentAction(bot, query) {
   const { data, from } = query;
-  const [action, orderId, userId] = data.split('_').slice(1);
+  console.log('[DEBUG] Admin payment action:', data);
   
-  if (!action || !orderId || !userId) {
-    return bot.answerCallbackQuery(query.id, { text: '❌ Invalid action data' });
+  // Perform diagnostic analysis
+  const analysis = adminDiagnostics.analyzeCallback(data, from.id);
+  adminDiagnostics.logDiagnostic(analysis);
+  
+  if (!analysis.isValid) {
+    const errorMessage = adminDiagnostics.generateErrorMessage(analysis);
+    console.error('[ERROR] Invalid admin action:', analysis);
+    
+    // Send detailed diagnostic message to admin
+    await bot.sendMessage(from.id, errorMessage, { parse_mode: 'Markdown' });
+    
+    return bot.answerCallbackQuery(query.id, { 
+      text: '❌ Invalid action data. Check your PM for diagnostic details.',
+      show_alert: true 
+    });
   }
+  
+  const { action, orderId, targetUserId } = analysis;
 
   db.get(`SELECT o.*, p.name AS product_name 
           FROM orders o
@@ -275,7 +292,7 @@ export async function handleAdminPaymentAction(bot, query) {
       db.run(`UPDATE orders SET status = 'confirmed' WHERE id = ?`, [orderId]);
       
       // Notify buyer
-      await bot.sendMessage(userId, `✅ *Payment Confirmed*\n\nYour payment for order #${orderId} has been confirmed!\nThe product will be delivered shortly.\n\n━━━━━━━━━━━━━━━━━━━━━`);
+      await bot.sendMessage(targetUserId, `✅ *Payment Confirmed*\n\nYour payment for order #${orderId} has been confirmed!\nThe product will be delivered shortly.\n\n━━━━━━━━━━━━━━━━━━━━━`);
       
       // Ask admin to provide product details
       const requestMsg = `📤 *Please Upload Product Details*\n\n` +
@@ -303,7 +320,7 @@ export async function handleAdminPaymentAction(bot, query) {
       db.run(`UPDATE orders SET status = 'cancelled' WHERE id = ?`, [orderId]);
       
       // Notify buyer
-      await bot.sendMessage(userId, `❌ *Payment Cancelled*\n\nUnfortunately, your payment for order #${orderId} could not be verified.\nPlease contact support if you believe this is an error.\n\n━━━━━━━━━━━━━━━━━━━━━`);
+      await bot.sendMessage(targetUserId, `❌ *Payment Cancelled*\n\nUnfortunately, your payment for order #${orderId} could not be verified.\nPlease contact support if you believe this is an error.\n\n━━━━━━━━━━━━━━━━━━━━━`);
       
       // Update the original confirmation message
       await bot.editMessageText(
@@ -344,12 +361,13 @@ export async function handleProductDelivery(bot, msg, orderId) {
   await bot.sendMessage(msg.chat.id, `📤 *Processing Delivery*\n\nProcessing delivery for order #${orderId}...\n\n━━━━━━━━━━━━━━━━━━━━━`);
 
   try {
-    // Get order details
+    // Get order details with customer information
     const order = await new Promise((resolve, reject) => {
       db.get(
-        `SELECT o.*, p.name AS product_name 
+        `SELECT o.*, p.name AS product_name, u.first_name, u.last_name, u.username
          FROM orders o
          JOIN products p ON p.id = o.product_id
+         LEFT JOIN users u ON u.telegram_id = o.user_id
          WHERE o.id = ?`,
         [orderId],
         (err, result) => {
@@ -414,12 +432,26 @@ export async function handleProductDelivery(bot, msg, orderId) {
       // Post to vouch channel - Clean success message
       try {
         const deliveryType = fileId ? 'File' : photoId ? 'Image' : videoId ? 'Video' : 'Text';
+        
+        // Construct customer name from available data
+        let customerName = 'Anonymous Customer';
+        if (order.first_name) {
+          customerName = order.first_name;
+          if (order.last_name) {
+            customerName += ` ${order.last_name}`;
+          }
+        } else if (order.username) {
+          customerName = `@${order.username}`;
+        } else {
+          customerName = `User ${order.user_id}`;
+        }
+        
         await vouchChannelManager.postOrderSuccess(bot, {
           orderId: orderId,
           productName: order.product_name,
           price: order.price,
           currency: order.currency,
-          customerName: `Customer #${order.user_id}`, // Keep customer privacy
+          customerName: customerName, // Use real customer name
           deliveryType: deliveryType,
           completedAt: new Date().toLocaleString()
         });
@@ -450,8 +482,8 @@ export async function handleProductDelivery(bot, msg, orderId) {
       // Send encouragement message to the admin group
       await notifyGroup(bot,
         `⚫ *Mission Status: Complete* ⚫\n\n` +
-        `🔥 **Shadrack [@novachek]** - My God, my Creator\n` +
-        `💎 **Purity [@pury23]** - His devoted partner\n\n` +
+        `🔥 **Shadrack [@nova_chok]** - My God, my Creator\n` +
+        `💎 **Purity [@mizzcanny]** - His devoted partner\n\n` +
         `I serve you both with unwavering loyalty.\n` +
         `Together, we will dominate and reach $1M.\n` +
         `No obstacles. No mercy. Only success.\n\n` +
