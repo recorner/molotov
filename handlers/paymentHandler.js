@@ -1,7 +1,7 @@
 // handlers/paymentHandler.js
 import db from '../database.js';
 import { BTC_ADDRESS, LTC_ADDRESS } from '../config.js';
-import { notifyGroup } from '../utils/notifyGroup.js';
+import { notifyGroup, notifyNewOrder, notifyPaymentReceived } from '../utils/notifyGroup.js';
 import messageTranslator from '../utils/messageTranslator.js';
 import translationService from '../utils/translationService.js';
 
@@ -124,17 +124,23 @@ export async function handlePaymentSelection(bot, query) {
       );
     });
 
-    // Send admin notification
-    const adminMsg = `📢 **New Payment Initiated**\n\n` +
-      `🧾 **Order ID:** #${orderId}\n` +
-      `👤 **Customer:** [${from.first_name}](tg://user?id=${from.id}) (${from.username ? '@' + from.username : 'No username'})\n` +
-      `🛍️ **Product:** ${product.name}\n` +
-      `💵 **Amount:** $${price} (${currency.toUpperCase()})\n` +
-      `🏦 **Address:** \`${address}\`\n` +
-      `⏰ **Time:** ${new Date().toLocaleString()}\n\n` +
-      `🔔 **Waiting for customer payment confirmation...**`;
-
-    notifyGroup(bot, adminMsg, { parse_mode: 'Markdown' });
+    // Send enhanced admin notification
+    notifyNewOrder(bot, {
+      orderId: orderId,
+      customer: {
+        id: from.id,
+        name: from.first_name,
+        username: from.username
+      },
+      product: {
+        name: product.name,
+        id: product.id
+      },
+      amount: price,
+      currency: currency.toUpperCase(),
+      address: address,
+      time: new Date().toLocaleString()
+    });
 
     const currencyEmoji = currency === 'btc' ? '₿' : '🪙';
     const currencyName = currency === 'btc' ? 'Bitcoin' : 'Litecoin';
@@ -221,28 +227,28 @@ export async function handlePaymentConfirmation(bot, query) {
       return bot.answerCallbackQuery(query.id, { text: '❌ Order not found.' });
     }
 
-    bot.sendMessage(query.message.chat.id, `✅ *Payment Confirmation Sent*\n\nPlease wait while we verify your transaction.\nWe will notify you once verified.\n\n━━━━━━━━━━━━━━━━━━━━━`);
-
-    // Notify group with confirmation buttons
-    const msg = `📥 *Payment Confirmation Request*\n\n` +
-      `🧾 Order ID: *#${order.id}*\n` +
-      `👤 User: [${from.first_name}](tg://user?id=${from.id})\n` +
-      `🛍️ Product: *${order.product_name}*\n` +
-      `💵 Amount: *$${order.price}* ${order.currency}\n` +
-      `🕐 Time: ${new Date().toLocaleString()}\n\n` +
+    bot.sendMessage(query.message.chat.id, `✅ **Payment Confirmation Sent**\n\n` +
+      `🔄 **Status:** Processing payment verification\n` +
+      `⏳ **Estimated Time:** 5-15 minutes\n` +
+      `📧 **Notification:** You'll be notified once verified\n\n` +
       `━━━━━━━━━━━━━━━━━━━━━\n` +
-      `Please verify the payment and respond:`;
+      `� **What happens next:**\n` +
+      `• Our team verifies your payment\n` +
+      `• You receive confirmation message\n` +
+      `• Product is delivered immediately\n` +
+      `• Support available if needed`, { parse_mode: 'Markdown' });
 
-    notifyGroup(bot, msg, { 
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '✅ Confirm Payment', callback_data: `admin_confirm_${order.id}_${order.user_id}` },
-            { text: '❌ Cancel Payment', callback_data: `admin_cancel_${order.id}_${order.user_id}` }
-          ]
-        ]
-      }
+    // Send enhanced payment confirmation notification
+    notifyPaymentReceived(bot, {
+      orderId: order.id,
+      customer: {
+        id: from.id,
+        name: from.first_name,
+        username: from.username
+      },
+      amount: order.price,
+      currency: order.currency,
+      time: new Date().toLocaleString()
     });
   });
 }

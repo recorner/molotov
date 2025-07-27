@@ -1,6 +1,6 @@
 // handlers/userHandler.js - Enhanced with multi-language support
 import db from '../database.js';
-import { notifyGroup } from '../utils/notifyGroup.js';
+import { notifyGroup, notifyNewUser } from '../utils/notifyGroup.js';
 import translationService from '../utils/translationService.js';
 import messageTranslator from '../utils/messageTranslator.js';
 import instantTranslationService from '../utils/instantTranslationService.js';
@@ -177,20 +177,17 @@ export async function handleLanguageSelection(bot, query) {
   try {
     await translationService.setUserLanguage(userId, languageCode);
     
-    // Send user joined notification after language selection
+    // Send enhanced user joined notification with PM links
     db.get('SELECT first_name, last_name, username FROM users WHERE telegram_id = ?', [userId], (err, user) => {
       if (!err && user) {
-        const joinedAt = new Date().toLocaleString();
-        const langInfo = translationService.getSupportedLanguages()[languageCode];
-        const intro = 
-          `🎉 *New User Joined!*\n\n` +
-          `👤 Name: ${user.first_name} ${user.last_name || ''}\n` +
-          `🔗 Username: [@${user.username}](https://t.me/${user.username})\n` +
-          `🆔 Telegram ID: \`${userId}\`\n` +
-          `🌐 Language: ${langInfo?.flag || '🌍'} ${langInfo?.name || languageCode}\n` +
-          `🕒 Time: ${joinedAt}`;
-
-        notifyGroup(bot, intro, { parse_mode: 'Markdown' });
+        notifyNewUser(bot, {
+          userId: userId,
+          firstName: user.first_name,
+          lastName: user.last_name,
+          username: user.username,
+          languageCode: languageCode,
+          joinTime: new Date().toLocaleString()
+        });
       }
     });
     

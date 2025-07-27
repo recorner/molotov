@@ -278,14 +278,43 @@ logger.logSystemEvent('BOT_STARTED', { version: '2.0.0', sidekick: true });
 
 bot.sendMessage(
   ADMIN_GROUP,
-  `🔁 *molotov bot restarted*\n🟢 Status: Online\n🚀 Sidekick System: Active\n🔐 Encryption: Enabled\n🌍 Multi-Language: Active\n📡 LibreTranslate: Ready\n🕒 ${new Date().toLocaleString()}`,
+  `� **Molotov Bot System Restarted**\n\n` +
+  `🟢 **Status:** Online & Ready\n` +
+  `🤖 **Sidekick System:** Active\n` +
+  `🔐 **Encryption:** Enabled\n` +
+  `🌍 **Multi-Language:** Active\n` +
+  `📡 **LibreTranslate:** Ready\n` +
+  `⚡ **Performance:** Optimized\n\n` +
+  `━━━━━━━━━━━━━━━━━━━━━\n` +
+  `🕒 **Restart Time:** ${new Date().toLocaleString()}\n` +
+  `🔧 **Version:** 2.0.0\n` +
+  `🛡️ **Security Level:** Maximum\n\n` +
+  `💡 **System Ready:**\n` +
+  `• Payment processing active\n` +
+  `• Translation services online\n` +
+  `• Admin panel accessible via /cocktail\n` +
+  `• All security measures enabled`,
   { parse_mode: 'Markdown' }
 ).catch(err => {
   console.error('[Startup Message Error]', err.message);
   // Try without markdown if markdown fails
   bot.sendMessage(
     ADMIN_GROUP,
-    `🔁 molotov bot restarted\n🟢 Status: Online\n🚀 Sidekick System: Active\n🔐 Encryption: Enabled\n🌍 Multi-Language: Active\n📡 LibreTranslate: Ready\n🕒 ${new Date().toLocaleString()}`
+    `� Molotov Bot System Restarted\n\n` +
+    `🟢 Status: Online & Ready\n` +
+    `🤖 Sidekick System: Active\n` +
+    `🔐 Encryption: Enabled\n` +
+    `🌍 Multi-Language: Active\n` +
+    `📡 LibreTranslate: Ready\n` +
+    `⚡ Performance: Optimized\n\n` +
+    `🕒 Restart Time: ${new Date().toLocaleString()}\n` +
+    `🔧 Version: 2.0.0\n` +
+    `🛡️ Security Level: Maximum\n\n` +
+    `💡 System Ready:\n` +
+    `• Payment processing active\n` +
+    `• Translation services online\n` +
+    `• Admin panel accessible via /cocktail\n` +
+    `• All security measures enabled`
   ).catch(e => console.error('[Fallback Message Error]', e.message));
 });
 
