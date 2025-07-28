@@ -8,18 +8,27 @@
 - **Privacy-first**: Customer data is anonymized for public display
 - **Error-resistant**: Graceful handling if channel is unavailable
 
+### 💬 Admin Delivery Reply System (NEW!)
+- **DeliveryTracker**: Tracks delivery confirmation messages
+- **Reply forwarding**: Admin replies to delivery confirmations are sent to buyers
+- **Context preservation**: Order details included in buyer messages
+- **Multi-media support**: Text, photos, documents, and videos
+
 ### 📁 Files Modified/Created
 
 #### New Files
 - `utils/vouchChannel.js` - Core vouch channel management system
+- `utils/deliveryTracker.js` - Delivery confirmation message tracking (NEW!)
 - `VOUCH_CHANNEL_README.md` - Complete documentation
+- `DELIVERY_REPLY_README.md` - Admin reply system documentation (NEW!)
 - Updates to production summary
 
 #### Modified Files
 - `config.js` - Added VOUCH_CHANNEL environment variable
-- `handlers/paymentHandler.js` - Integrated vouch posting in delivery flow
+- `handlers/paymentHandler.js` - Integrated vouch posting + delivery reply system (NEW!)
 - `handlers/adminHandler.js` - Added vouch channel admin panel
 - `env_template.txt` - Added vouch channel configuration
+- `bot.js` - Added delivery reply detection (NEW!)
 
 ### 🎯 Features Implemented
 
@@ -36,11 +45,13 @@
 - Setup guide and example message preview
 - Configuration status display
 
-#### ✅ Privacy Protection
-- Customer names become "Customer #[ID]" 
-- No personal information exposed
-- Only essential order details shown
-- Professional, trustworthy appearance
+#### ✅ Admin Delivery Reply System (NEW!)
+- **Automatic message tracking** when products are delivered
+- **Reply forwarding** - admin replies to delivery confirmations go to buyers  
+- **Context preservation** - buyer sees order details with every message
+- **Multi-media support** - send text, photos, documents, videos to buyers
+- **Confirmation system** - admin knows when message was sent successfully
+- **24-hour tracking** with automatic cleanup for efficiency
 
 #### ✅ Multi-format Support
 - Automatic emoji selection based on delivery type:

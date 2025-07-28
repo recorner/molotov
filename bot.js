@@ -32,7 +32,8 @@ import { showProductsInCategory } from './handlers/productHandler.js';
 import { handleWalletCallback } from './handlers/walletHandler.js';
 import { setupDailyWalletPrompt, handleWalletPromptResponse } from './scheduler.js';
 import { handleWalletInput, handleWalletFinalSave } from './handlers/walletHandler.js';
-import { handleAdminPaymentAction, handleProductDelivery } from './handlers/paymentHandler.js';
+import { handleAdminPaymentAction, handleProductDelivery, handleDeliveryReply, handleReplyToAdmin } from './handlers/paymentHandler.js';
+import { handlePokeCommand, handlePokeInput } from './handlers/pokeHandler.js';
 
 // Translation Services
 import translationService from './utils/translationService.js';
@@ -338,6 +339,7 @@ bot.onText(/^\/(addcategory|addsubcategory|addproduct)(.*)/, (msg) => {
   handleAdminCommand(bot, msg);
 });
 bot.onText(/\/cocktail/, (msg) => handleAdminCommand(bot, msg));
+bot.onText(/\/poke/, (msg) => handlePokeCommand(bot, msg));
 
 // News and announcements command (restricted to admins)
 bot.onText(/\/news/, (msg) => handleNewsCommand(bot, msg));
@@ -477,13 +479,31 @@ bot.on('callback_query', async (query) => {
       return await handleCancelOrder(bot, query);
     }
 
+    // REPLY TO ADMIN
+    if (data.startsWith('reply_to_admin_')) {
+      return await handleReplyToAdmin(bot, query);
+    }
 
 
-    // Admin panel routing (but exclude payment actions)
+
+    // Admin payment actions (must come before general admin routing)
+    if (data.startsWith('admin_confirm_') || data.startsWith('admin_cancel_')) {
+      return await handleAdminPaymentAction(bot, query);
+    }
+
+    // Admin panel routing (more specific now)
     if (
       data.startsWith('panel_') ||
       data === 'cocktail_back' ||
-      (data.startsWith('admin_') && !data.startsWith('admin_confirm_') && !data.startsWith('admin_cancel_'))
+      data.startsWith('admin_analytics') ||
+      data.startsWith('admin_groups') ||
+      data.startsWith('admin_sync') ||
+      data.startsWith('admin_logs') ||
+      data.startsWith('admin_settings') ||
+      data.startsWith('vouch_') ||
+      data.startsWith('wallet_') ||
+      data.startsWith('export_') ||
+      data.startsWith('news_') && !data.startsWith('news_main')
     ) {
       return handleAdminCallback(bot, query);
     }
@@ -533,11 +553,6 @@ bot.on('callback_query', async (query) => {
       });
     }
 
-    // Admin payment actions
-    if (data.startsWith('admin_confirm_') || data.startsWith('admin_cancel_')) {
-      return await handleAdminPaymentAction(bot, query);
-    }
-
     // Fallback for unknown callbacks - Add more specific error handling
     console.warn('[Callback] Unknown callback data:', data);
     return await messageTranslator.answerTranslatedCallback(bot, query.id, 'unknown_action', userId);
@@ -564,6 +579,82 @@ bot.on('message', async (msg) => {
     chatId: msg.chat.id
   });
 
+  // Handle buyer reply to admin (if user is in reply mode)
+  if (global.replyMode && global.replyMode.has(msg.from.id)) {
+    const replyData = global.replyMode.get(msg.from.id);
+    
+    // Check if reply mode has expired (5 minutes)
+    if (Date.now() - replyData.timestamp > 300000) {
+      global.replyMode.delete(msg.from.id);
+      await bot.sendMessage(msg.chat.id, '⏰ Reply mode has expired. Please use the reply button again.');
+      return;
+    }
+
+    // Handle cancel command
+    if (text === '/cancel') {
+      global.replyMode.delete(msg.from.id);
+      await bot.sendMessage(msg.chat.id, '❌ Reply mode cancelled.');
+      return;
+    }
+
+    // Forward message to admin
+    try {
+      const { ADMIN_GROUP } = await import('./config.js');
+      
+      let forwardMessage = `📩 **Customer Reply**\n\n` +
+        `👤 User: ${msg.from.first_name || 'Unknown'} (${msg.from.id})\n` +
+        `🧾 Order: #${replyData.orderId}\n` +
+        `📝 Message: ${text || 'Media file'}\n` +
+        `⏰ Sent: ${new Date().toLocaleString()}`;
+
+      if (msg.document) {
+        await bot.sendDocument(ADMIN_GROUP, msg.document.file_id, {
+          caption: forwardMessage,
+          parse_mode: 'Markdown'
+        });
+      } else if (msg.photo) {
+        await bot.sendPhoto(ADMIN_GROUP, msg.photo[msg.photo.length - 1].file_id, {
+          caption: forwardMessage,
+          parse_mode: 'Markdown'
+        });
+      } else if (msg.video) {
+        await bot.sendVideo(ADMIN_GROUP, msg.video.file_id, {
+          caption: forwardMessage,
+          parse_mode: 'Markdown'
+        });
+      } else if (text) {
+        await bot.sendMessage(ADMIN_GROUP, forwardMessage, {
+          parse_mode: 'Markdown'
+        });
+      }
+
+      // Confirm to user
+      await bot.sendMessage(msg.chat.id, 
+        `✅ **Message sent to admin**\n\n` +
+        `🧾 Order: #${replyData.orderId}\n` +
+        `📝 Your message has been forwarded to the admin team.\n` +
+        `⏰ Sent: ${new Date().toLocaleString()}`,
+        { parse_mode: 'Markdown' }
+      );
+
+      // Clear reply mode after successful send
+      global.replyMode.delete(msg.from.id);
+
+      logger.info('BUYER_REPLY', `Customer reply forwarded to admin`, {
+        orderId: replyData.orderId,
+        userId: msg.from.id,
+        messageType: msg.document ? 'document' : msg.photo ? 'photo' : msg.video ? 'video' : 'text'
+      });
+
+      return;
+    } catch (error) {
+      console.error('[ERROR] Failed to forward buyer reply:', error);
+      await bot.sendMessage(msg.chat.id, '❌ Failed to send message to admin. Please try again.');
+      logger.error('BUYER_REPLY', 'Failed to forward buyer reply', error);
+      return;
+    }
+  }
+
   // Handle product delivery uploads (files, photos, and text)
   if (msg.reply_to_message && msg.reply_to_message.text?.includes('Please Upload Product Details')) {
     console.log('[DEBUG] Product delivery detected, full reply text:', msg.reply_to_message.text);
@@ -581,12 +672,25 @@ bot.on('message', async (msg) => {
     }
   }
 
+  // Handle admin replies to delivery confirmation messages
+  if (msg.reply_to_message && msg.reply_to_message.text?.includes('Product Delivered Successfully')) {
+    console.log('[DEBUG] Delivery reply detected');
+    const wasHandled = await handleDeliveryReply(bot, msg);
+    if (wasHandled) {
+      return; // Message was handled as delivery reply
+    }
+  }
+
   // Skip processing for commands
   if (text && text.startsWith('/')) return;
 
   // Handle wallet input if it's text and not a command
   if (text && !text.startsWith('/')) {
     try {
+      // Check for poke input first
+      const pokeHandled = await handlePokeInput(bot, msg);
+      if (pokeHandled) return;
+
       // Check for sidekick input first
       if (sidekickInputHandler) {
         const sidekickHandled = await sidekickInputHandler.handleInput(msg);

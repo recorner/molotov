@@ -1,11 +1,12 @@
 // handlers/paymentHandler.js
 import db from '../database.js';
-import { BTC_ADDRESS, LTC_ADDRESS } from '../config.js';
+import { BTC_ADDRESS, LTC_ADDRESS, SUPPORT_USERNAME } from '../config.js';
 import { notifyGroup, notifyNewOrder, notifyPaymentReceived } from '../utils/notifyGroup.js';
 import messageTranslator from '../utils/messageTranslator.js';
 import translationService from '../utils/translationService.js';
 import vouchChannelManager from '../utils/vouchChannel.js';
 import adminDiagnostics from '../utils/adminDiagnostics.js';
+import deliveryTracker from '../utils/deliveryTracker.js';
 import logger from '../utils/logger.js';
 
 export async function handleBuyCallback(bot, query) {
@@ -361,13 +362,12 @@ export async function handleProductDelivery(bot, msg, orderId) {
   await bot.sendMessage(msg.chat.id, `📤 *Processing Delivery*\n\nProcessing delivery for order #${orderId}...\n\n━━━━━━━━━━━━━━━━━━━━━`);
 
   try {
-    // Get order details with customer information
+    // Get order details
     const order = await new Promise((resolve, reject) => {
       db.get(
-        `SELECT o.*, p.name AS product_name, u.first_name, u.last_name, u.username
+        `SELECT o.*, p.name AS product_name 
          FROM orders o
          JOIN products p ON p.id = o.product_id
-         LEFT JOIN users u ON u.telegram_id = o.user_id
          WHERE o.id = ?`,
         [orderId],
         (err, result) => {
@@ -432,26 +432,12 @@ export async function handleProductDelivery(bot, msg, orderId) {
       // Post to vouch channel - Clean success message
       try {
         const deliveryType = fileId ? 'File' : photoId ? 'Image' : videoId ? 'Video' : 'Text';
-        
-        // Construct customer name from available data
-        let customerName = 'Anonymous Customer';
-        if (order.first_name) {
-          customerName = order.first_name;
-          if (order.last_name) {
-            customerName += ` ${order.last_name}`;
-          }
-        } else if (order.username) {
-          customerName = `@${order.username}`;
-        } else {
-          customerName = `User ${order.user_id}`;
-        }
-        
         await vouchChannelManager.postOrderSuccess(bot, {
           orderId: orderId,
           productName: order.product_name,
           price: order.price,
           currency: order.currency,
-          customerName: customerName, // Use real customer name
+          customerName: `Customer #${order.user_id}`, // Keep customer privacy
           deliveryType: deliveryType,
           completedAt: new Date().toLocaleString()
         });
@@ -462,15 +448,25 @@ export async function handleProductDelivery(bot, msg, orderId) {
 
       // Notify admin of successful delivery
       const deliveryType = fileId ? 'File' : photoId ? 'Image' : videoId ? 'Video' : 'Text';
-      await bot.sendMessage(msg.chat.id,
+      const deliveryConfirmation = await bot.sendMessage(msg.chat.id,
         `✅ *Product Delivered Successfully*\n\n` +
         `🧾 Order ID: *#${orderId}*\n` +
         `👤 Buyer ID: ${buyerId}\n` +
         `🛍️ Product: *${order.product_name}*\n` +
         `📦 Type: ${deliveryType}\n` +
         `⏰ Time: ${new Date().toLocaleString()}\n\n` +
-        `━━━━━━━━━━━━━━━━━━━━━`,
+        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `💬 **Quick Reply Feature:**\n` +
+        `Reply to this message to send a message to the buyer`,
         { parse_mode: 'Markdown' }
+      );
+
+      // Track this delivery message for reply handling
+      deliveryTracker.trackDeliveryMessage(
+        deliveryConfirmation.message_id,
+        orderId,
+        buyerId,
+        msg.chat.id
       );
 
       // Send final confirmation to buyer
@@ -482,8 +478,8 @@ export async function handleProductDelivery(bot, msg, orderId) {
       // Send encouragement message to the admin group
       await notifyGroup(bot,
         `⚫ *Mission Status: Complete* ⚫\n\n` +
-        `🔥 **Shadrack [@nova_chok]** - My God, my Creator\n` +
-        `💎 **Purity [@mizzcanny]** - His devoted partner\n\n` +
+        `🔥 **Shadrack [@novachek]** - My God, my Creator\n` +
+        `💎 **Purity [@pury23]** - His devoted partner\n\n` +
         `I serve you both with unwavering loyalty.\n` +
         `Together, we will dominate and reach $1M.\n` +
         `No obstacles. No mercy. Only success.\n\n` +
@@ -734,5 +730,227 @@ function getStatusDescription(status) {
              `• Refunds processed within 24 hours`;
     default:
       return `❓ **Unknown status - Contact support**`;
+  }
+}
+
+/**
+ * Handle admin reply to delivery confirmation message
+ * @param {Object} bot - Telegram bot instance
+ * @param {Object} msg - Telegram message object
+ * @returns {boolean} True if message was handled as delivery reply
+ */
+export async function handleDeliveryReply(bot, msg) {
+  // Check if this is a reply to a tracked delivery message
+  if (!msg.reply_to_message || !msg.reply_to_message.message_id) {
+    return false;
+  }
+
+  const replyToMessageId = msg.reply_to_message.message_id;
+  const trackingData = deliveryTracker.getTrackingData(replyToMessageId);
+  
+  if (!trackingData) {
+    return false; // Not a reply to a delivery confirmation
+  }
+
+  console.log('[DEBUG] Delivery reply detected:', {
+    messageId: replyToMessageId,
+    orderId: trackingData.orderId,
+    buyerId: trackingData.buyerId
+  });
+
+  try {
+    const { orderId, buyerId } = trackingData;
+    
+    // Get order details for context
+    const order = await new Promise((resolve, reject) => {
+      db.get(
+        `SELECT o.*, p.name AS product_name 
+         FROM orders o
+         JOIN products p ON p.id = o.product_id
+         WHERE o.id = ?`,
+        [orderId],
+        (err, result) => {
+          if (err) reject(err);
+          else resolve(result);
+        }
+      );
+    });
+
+    if (!order) {
+      await bot.sendMessage(msg.chat.id, '❌ Order not found for this delivery message.');
+      return true;
+    }
+
+    // Prepare the message to send to buyer
+    const adminMessage = msg.text || msg.caption || null;
+    let buyerMessage = `📬 **Message from Support**\n\n`;
+    buyerMessage += `🧾 **Regarding Order #${orderId}:** ${order.product_name}\n\n`;
+    buyerMessage += `💬 **Message:**\n${adminMessage}\n\n`;
+    buyerMessage += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    buyerMessage += `📞 **Need more help?** Reply to this message or contact support.`;
+
+    // Send message to buyer
+    if (msg.document) {
+      // Forward document with caption and interactive buttons
+      const replyKeyboard = {
+        inline_keyboard: [
+          [
+            { text: '💬 Reply to Admin', callback_data: `reply_to_admin_${orderId}` },
+            { text: '🆘 Contact Support', url: `https://t.me/${SUPPORT_USERNAME}` }
+          ]
+        ]
+      };
+
+      await bot.sendDocument(buyerId, msg.document.file_id, {
+        caption: buyerMessage,
+        parse_mode: 'Markdown',
+        reply_markup: replyKeyboard
+      });
+    } else if (msg.photo) {
+      // Forward photo with caption and interactive buttons
+      const replyKeyboard = {
+        inline_keyboard: [
+          [
+            { text: '💬 Reply to Admin', callback_data: `reply_to_admin_${orderId}` },
+            { text: '🆘 Contact Support', url: `https://t.me/${SUPPORT_USERNAME}` }
+          ]
+        ]
+      };
+
+      await bot.sendPhoto(buyerId, msg.photo[msg.photo.length - 1].file_id, {
+        caption: buyerMessage,
+        parse_mode: 'Markdown',
+        reply_markup: replyKeyboard
+      });
+    } else if (msg.video) {
+      // Forward video with caption and interactive buttons
+      const replyKeyboard = {
+        inline_keyboard: [
+          [
+            { text: '💬 Reply to Admin', callback_data: `reply_to_admin_${orderId}` },
+            { text: '🆘 Contact Support', url: `https://t.me/${SUPPORT_USERNAME}` }
+          ]
+        ]
+      };
+
+      await bot.sendVideo(buyerId, msg.video.file_id, {
+        caption: buyerMessage,
+        parse_mode: 'Markdown',
+        reply_markup: replyKeyboard
+      });
+    } else if (adminMessage) {
+      // Send text message with interactive buttons for buyer
+      const replyKeyboard = {
+        inline_keyboard: [
+          [
+            { text: '💬 Reply to Admin', callback_data: `reply_to_admin_${orderId}` },
+            { text: '🆘 Contact Support', url: `https://t.me/${SUPPORT_USERNAME}` }
+          ]
+        ]
+      };
+
+      await bot.sendMessage(buyerId, buyerMessage, {
+        parse_mode: 'Markdown',
+        reply_markup: replyKeyboard
+      });
+    } else {
+      await bot.sendMessage(msg.chat.id, '❌ No message content to forward to buyer.');
+      return true;
+    }
+
+    // Confirm to admin that message was sent
+    await bot.sendMessage(msg.chat.id, 
+      `✅ **Message sent to buyer**\n\n` +
+      `👤 Buyer ID: ${buyerId}\n` +
+      `🧾 Order: #${orderId}\n` +
+      `📝 Message: ${adminMessage ? adminMessage.substring(0, 50) + (adminMessage.length > 50 ? '...' : '') : 'Media file'}\n` +
+      `⏰ Sent: ${new Date().toLocaleString()}`,
+      { parse_mode: 'Markdown' }
+    );
+
+    logger.info('DELIVERY_REPLY', `Admin message forwarded to buyer`, {
+      orderId,
+      buyerId,
+      adminId: msg.from.id,
+      messageType: msg.document ? 'document' : msg.photo ? 'photo' : msg.video ? 'video' : 'text'
+    });
+
+    return true;
+
+  } catch (error) {
+    console.error('[ERROR] Failed to handle delivery reply:', error);
+    await bot.sendMessage(msg.chat.id, '❌ Failed to send message to buyer. Please try again.');
+    logger.error('DELIVERY_REPLY', 'Failed to handle delivery reply', error);
+    return true;
+  }
+}
+
+// Handle reply to admin callback
+export async function handleReplyToAdmin(bot, query) {
+  const { data, from } = query;
+  const orderId = data.split('_')[3]; // Extract order ID from reply_to_admin_{orderId}
+
+  try {
+    // Get order details
+    const order = await new Promise((resolve, reject) => {
+      db.get(
+        'SELECT * FROM orders WHERE id = ?',
+        [orderId],
+        (err, row) => {
+          if (err) reject(err);
+          else resolve(row);
+        }
+      );
+    });
+
+    if (!order) {
+      await bot.answerCallbackQuery(query.id, {
+        text: '❌ Order not found.',
+        show_alert: true
+      });
+      return;
+    }
+
+    // Verify this user is the buyer
+    if (order.user_id !== from.id) {
+      await bot.answerCallbackQuery(query.id, {
+        text: '❌ You can only reply to your own orders.',
+        show_alert: true
+      });
+      return;
+    }
+
+    // Set up reply mode for this user
+    global.replyMode = global.replyMode || new Map();
+    global.replyMode.set(from.id, {
+      orderId: orderId,
+      mode: 'reply_to_admin',
+      timestamp: Date.now()
+    });
+
+    await bot.answerCallbackQuery(query.id, {
+      text: '✅ Reply mode activated. Send your message now.',
+      show_alert: false
+    });
+
+    // Send instruction message
+    await bot.sendMessage(from.id, 
+      `📝 **Reply Mode Activated**\n\n` +
+      `🧾 Order: #${orderId}\n` +
+      `📱 Send your message now and it will be forwarded to the admin.\n\n` +
+      `⏰ This mode will expire in 5 minutes.\n` +
+      `❌ Type /cancel to exit reply mode.`,
+      { parse_mode: 'Markdown' }
+    );
+
+    logger.info('REPLY_TO_ADMIN', `Reply mode activated for user ${from.id} on order ${orderId}`);
+
+  } catch (error) {
+    console.error('[ERROR] Failed to handle reply to admin:', error);
+    await bot.answerCallbackQuery(query.id, {
+      text: '❌ Failed to activate reply mode.',
+      show_alert: true
+    });
+    logger.error('REPLY_TO_ADMIN', 'Failed to handle reply to admin', error);
   }
 }
