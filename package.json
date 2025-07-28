@@ -7,6 +7,7 @@
     "start": "npm run start:redis && node bot.js",
     "start:redis": "redis-server --daemonize yes --port 6379 || echo 'Redis already running or not installed'",
     "dev": "node --watch bot.js",
+    "build": "npm run build:translations",
     "build:translations": "node scripts/build-translations-optimized.js",
     "build:translations:full": "node scripts/build-translations.js",
     "prebuild": "npm run build:translations",
