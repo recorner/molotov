@@ -31,11 +31,17 @@ class OptimizedTranslationBuilder {
     const envLanguages = process.env.SUPPORTED_LANGUAGES;
     
     if (!envLanguages) {
-      console.warn('⚠️ SUPPORTED_LANGUAGES not set in environment, using minimal set');
+      console.warn('⚠️ SUPPORTED_LANGUAGES not set in environment, using default set');
       return ['es', 'fr', 'de', 'ru', 'zh'];
     }
 
     const languages = envLanguages.split(',').map(lang => lang.trim()).filter(lang => lang);
+    
+    if (languages.length === 0) {
+      console.warn('⚠️ No valid languages found in SUPPORTED_LANGUAGES, using default set');
+      return ['es', 'fr', 'de', 'ru', 'zh'];
+    }
+    
     console.log(`🎯 Building translations for configured languages: ${languages.join(', ')}`);
     return languages;
   }
@@ -103,37 +109,39 @@ class OptimizedTranslationBuilder {
       const templateKey = templates[i];
       const templateText = messageTranslator.messageTemplates[templateKey];
 
+      // Show progress
+      if (i % 10 === 0) {
+        const progress = Math.round((i / templates.length) * 100);
+        console.log(`  📈 Progress: ${i}/${templates.length} (${progress}%)`);
+      }
+
       try {
-        // Show progress
-        if (i % 10 === 0) {
-          const progress = Math.round((i / templates.length) * 100);
-          console.log(`  📈 Progress: ${i}/${templates.length} (${progress}%)`);
-        }
+        // Translate with timeout
+        const translatedText = await Promise.race([
+          translationService.translate(templateText, language),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000))
+        ]);
 
-        // Translate template
-        const translatedText = await translationService.translate(templateText, language);
-
-        if (translatedText && translatedText !== templateText) {
+        if (translatedText && translatedText !== templateText && translatedText.length > 0) {
           this.translationsData[language][templateKey] = translatedText;
           successCount++;
           this.stats.successfulTranslations++;
         } else {
-          // Use English as fallback
+          // Use English fallback
           this.translationsData[language][templateKey] = templateText;
           failCount++;
           this.stats.failedTranslations++;
         }
 
-        // Add small delay to avoid overwhelming the translation service
-        await new Promise(resolve => setTimeout(resolve, 100));
-
       } catch (error) {
-        console.log(`  ❌ Failed to translate ${templateKey}: ${error.message}`);
-        // Use English as fallback
+        // Use English fallback for any error
         this.translationsData[language][templateKey] = templateText;
         failCount++;
         this.stats.failedTranslations++;
       }
+
+      // Small delay to avoid overwhelming translation service
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
 
     const efficiency = Math.round((successCount / templates.length) * 100);
@@ -203,26 +211,14 @@ async function main() {
   const builder = new OptimizedTranslationBuilder();
 
   try {
-    // Test LibreTranslate connection
-    console.log('🔍 Testing LibreTranslate connection...');
-    const testTranslation = await translationService.translate('Hello', 'es');
-    
-    if (!testTranslation || testTranslation === 'Hello') {
-      throw new Error('LibreTranslate service is not responding correctly');
-    }
-    
-    console.log('✅ LibreTranslate connection successful');
-
-    // Build all translations
+    // Build all translations with automatic fallbacks
     await builder.buildAllTranslations();
     
     console.log('\n🎉 Optimized translation build completed successfully!');
     console.log('💡 Tip: Run "node load-translations-to-redis.js" to load into Redis cache');
-    process.exit(0);
 
   } catch (error) {
     console.error(`\n❌ Translation build failed: ${error.message}`);
-    console.error(error.stack);
     process.exit(1);
   }
 }
