@@ -12,11 +12,10 @@ The Auto Vouch Channel feature automatically posts clean, professional messages 
 - Maintains customer privacy
 
 ### 🛡️ Privacy Protection
-- Customer names are displayed as provided in their Telegram profile
-- Shows first name and last name if available
-- Falls back to username (@username) if no real name
-- Anonymous fallback for users without any name data
-- No sensitive personal information beyond public profile data
+- Customer names are anonymized as "Customer #ID"
+- No sensitive personal information exposed
+- Shows only essential order details
+- Professional appearance
 
 ### 📝 Message Format
 ```
@@ -25,7 +24,7 @@ The Auto Vouch Channel feature automatically posts clean, professional messages 
 🧾 Order ID: #1234
 🛍️ Product: Premium VPN License
 💰 Amount: $29.99 ₿BTC
-👤 Customer: John Smith
+👤 Customer: Customer #12345
 📄 Delivery: File
 🕒 Completed: Dec 27, 2025, 10:30 AM
 
