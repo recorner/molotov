@@ -540,8 +540,7 @@ bot.on('callback_query', async (query) => {
       data.startsWith('admin_settings') ||
       data.startsWith('vouch_') ||
       data.startsWith('wallet_') ||
-      data.startsWith('export_') ||
-      data.startsWith('news_') && !data.startsWith('news_main')
+      data.startsWith('export_')
     ) {
       return handleAdminCallback(bot, query);
     }
@@ -555,13 +554,6 @@ bot.on('callback_query', async (query) => {
       return handleNewsCallback(bot, query);
     }
 
-    // News and announcements routing
-    if (
-      data.startsWith('news_') ||
-      data === 'news_main'
-    ) {
-      return handleNewsCallback(bot, query);
-    }
     //wallet prompt
     if (data.startsWith('walletcheck_')) {
       return handleWalletPromptResponse(bot, query);

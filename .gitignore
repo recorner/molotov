@@ -20,6 +20,8 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+*.db
+
 
 # Temporary files
 *.tmp
