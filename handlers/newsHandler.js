@@ -5,6 +5,7 @@ import logger from '../utils/logger.js';
 import { notifyGroup } from '../utils/notifyGroup.js';
 import newsSessionManager from '../utils/newsSessionManager.js';
 import newsBroadcaster from '../utils/newsBroadcaster.js';
+import translationService from '../utils/translationService.js';
 
 // === Handle /news Command ===
 export async function handleNewsCommand(bot, msg) {
@@ -190,39 +191,38 @@ async function showLanguageSelection(bot, chatId, messageId) {
   
   text += `\n🌍 All Languages: **${Object.values(languageStats).reduce((a, b) => a + b, 0)}** total users`;
 
+  // Generate dynamic keyboard from supported languages
+  const supportedLanguages = translationService.getSupportedLanguages();
+  const keyboard = [];
+  const langEntries = Object.entries(supportedLanguages);
+  
+  // Create rows of 2 languages each
+  for (let i = 0; i < langEntries.length; i += 2) {
+    const row = [];
+    
+    for (let j = i; j < Math.min(i + 2, langEntries.length); j++) {
+      const [code, info] = langEntries[j];
+      row.push({
+        text: `${info.flag} ${info.name}`,
+        callback_data: `news_lang_${code}`
+      });
+    }
+    
+    keyboard.push(row);
+  }
+  
+  // Add special options
+  keyboard.push([
+    { text: '🌍 All Languages', callback_data: 'news_lang_all' },
+    { text: '🎯 Multiple Select', callback_data: 'news_lang_multi' }
+  ]);
+  keyboard.push([{ text: '🔙 Back to News Panel', callback_data: 'news_main' }]);
+
   return bot.editMessageText(text, {
     chat_id: chatId,
     message_id: messageId,
     parse_mode: 'Markdown',
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '🇺🇸 English', callback_data: 'news_lang_en' },
-          { text: '🇷🇺 Russian', callback_data: 'news_lang_ru' }
-        ],
-        [
-          { text: '🇪🇸 Spanish', callback_data: 'news_lang_es' },
-          { text: '🇫🇷 French', callback_data: 'news_lang_fr' }
-        ],
-        [
-          { text: '🇩🇪 German', callback_data: 'news_lang_de' },
-          { text: '🇮🇹 Italian', callback_data: 'news_lang_it' }
-        ],
-        [
-          { text: '🇯🇵 Japanese', callback_data: 'news_lang_ja' },
-          { text: '🇰🇷 Korean', callback_data: 'news_lang_ko' }
-        ],
-        [
-          { text: '🇨🇳 Chinese', callback_data: 'news_lang_zh' },
-          { text: '🇮🇳 Hindi', callback_data: 'news_lang_hi' }
-        ],
-        [
-          { text: '🌍 All Languages', callback_data: 'news_lang_all' },
-          { text: '🎯 Multiple Select', callback_data: 'news_lang_multi' }
-        ],
-        [{ text: '🔙 Back to News Panel', callback_data: 'news_main' }]
-      ]
-    }
+    reply_markup: { inline_keyboard: keyboard }
   });
 }
 
@@ -1133,37 +1133,17 @@ async function saveAnnouncement(session, userId, status = 'draft') {
 // === Template and Language Helper Functions ===
 
 function getLanguageName(code) {
-  const languages = {
-    'en': 'English',
-    'ru': 'Russian', 
-    'es': 'Spanish',
-    'fr': 'French',
-    'de': 'German',
-    'it': 'Italian',
-    'ja': 'Japanese',
-    'ko': 'Korean',
-    'zh': 'Chinese',
-    'hi': 'Hindi',
-    'all': 'All Languages'
-  };
-  return languages[code] || 'Unknown';
+  if (code === 'all') return 'All Languages';
+  
+  const supportedLanguages = translationService.getSupportedLanguages();
+  return supportedLanguages[code]?.name || 'Unknown';
 }
 
 function getLanguageFlag(code) {
-  const flags = {
-    'en': '🇺🇸',
-    'ru': '🇷🇺',
-    'es': '🇪🇸', 
-    'fr': '🇫🇷',
-    'de': '🇩🇪',
-    'it': '🇮🇹',
-    'ja': '🇯🇵',
-    'ko': '🇰🇷',
-    'zh': '🇨🇳',
-    'hi': '🇮🇳',
-    'all': '🌍'
-  };
-  return flags[code] || '🏳️';
+  if (code === 'all') return '�';
+  
+  const supportedLanguages = translationService.getSupportedLanguages();
+  return supportedLanguages[code]?.flag || '🏳️';
 }
 
 function getTypeName(type) {

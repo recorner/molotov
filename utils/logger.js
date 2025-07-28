@@ -135,23 +135,71 @@ class Logger {
   }
 
   // Log cleanup methods
-  cleanupOldLogs(daysToKeep = 30) {
+  cleanupOldLogs(daysToKeep = 7) { // Changed default to 7 days
     try {
       const files = fs.readdirSync(this.logDir);
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+      
+      let cleanedCount = 0;
+      let totalSize = 0;
 
       files.forEach(file => {
-        if (file.endsWith('.log') && file.match(/^\d{4}-\d{2}-\d{2}\.log$/)) {
+        const filePath = path.join(this.logDir, file);
+        const stat = fs.statSync(filePath);
+        
+        // Clean up daily logs (YYYY-MM-DD.log format)
+        if (file.match(/^\d{4}-\d{2}-\d{2}\.log$/)) {
           const fileDate = new Date(file.replace('.log', ''));
           if (fileDate < cutoffDate) {
-            fs.unlinkSync(path.join(this.logDir, file));
-            this.info('SYSTEM', `Cleaned up old log file: ${file}`);
+            totalSize += stat.size;
+            fs.unlinkSync(filePath);
+            cleanedCount++;
+            this.info('CLEANUP', `Removed old daily log: ${file}`);
+          }
+        }
+        
+        // Clean up other log files older than retention period
+        else if (file.endsWith('.log') && stat.mtime < cutoffDate) {
+          // Keep core log files (errors.log, security.log, transactions.log) but truncate if too large
+          if (['errors.log', 'security.log', 'transactions.log'].includes(file)) {
+            if (stat.size > 10 * 1024 * 1024) { // 10MB
+              this.truncateLogFile(filePath, 1000); // Keep last 1000 lines
+              this.info('CLEANUP', `Truncated large log file: ${file}`);
+            }
+          } else {
+            totalSize += stat.size;
+            fs.unlinkSync(filePath);
+            cleanedCount++;
+            this.info('CLEANUP', `Removed old log file: ${file}`);
           }
         }
       });
+      
+      if (cleanedCount > 0) {
+        this.info('CLEANUP', `Log cleanup completed: ${cleanedCount} files removed, ${Math.round(totalSize / 1024)}KB freed`);
+      }
+      
+      return { cleanedCount, totalSize };
     } catch (error) {
-      this.error('SYSTEM', 'Failed to cleanup old logs', error);
+      this.error('CLEANUP', 'Failed to cleanup old logs', error);
+      return { cleanedCount: 0, totalSize: 0 };
+    }
+  }
+
+  // Truncate large log files to keep only recent entries
+  truncateLogFile(filePath, linesToKeep = 1000) {
+    try {
+      const content = fs.readFileSync(filePath, 'utf8');
+      const lines = content.split('\n');
+      
+      if (lines.length > linesToKeep) {
+        const recentLines = lines.slice(-linesToKeep);
+        const header = `# Log file truncated on ${new Date().toISOString()}\n# Keeping last ${linesToKeep} entries\n\n`;
+        fs.writeFileSync(filePath, header + recentLines.join('\n'));
+      }
+    } catch (error) {
+      this.error('CLEANUP', `Failed to truncate log file: ${filePath}`, error);
     }
   }
 

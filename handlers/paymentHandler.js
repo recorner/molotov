@@ -73,7 +73,7 @@ export async function handleBuyCallback(bot, query) {
     });
 
   } catch (error) {
-    console.error('[Buy Callback Error]', error);
+    logger.error('PAYMENT', `Buy callback error for user ${from.id}, product ${productId}`, error);
     const errorMsg = await messageTranslator.translateTemplateForUser('error_processing', from.id);
     bot.answerCallbackQuery(query.id, { text: errorMsg });
   }
@@ -259,7 +259,7 @@ export async function handlePaymentConfirmation(bot, query) {
 
 export async function handleAdminPaymentAction(bot, query) {
   const { data, from } = query;
-  console.log('[DEBUG] Admin payment action:', data);
+  logger.info('ADMIN', `Admin payment action: ${data} by user ${from.id}`);
   
   // Perform diagnostic analysis
   const analysis = adminDiagnostics.analyzeCallback(data, from.id);
@@ -267,7 +267,7 @@ export async function handleAdminPaymentAction(bot, query) {
   
   if (!analysis.isValid) {
     const errorMessage = adminDiagnostics.generateErrorMessage(analysis);
-    console.error('[ERROR] Invalid admin action:', analysis);
+    logger.error('ADMIN', `Invalid admin action: ${data}`, analysis);
     
     // Send detailed diagnostic message to admin
     await bot.sendMessage(from.id, errorMessage, { parse_mode: 'Markdown' });

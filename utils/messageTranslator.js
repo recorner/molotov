@@ -18,6 +18,7 @@ class MessageTranslator {
       'select_language': '🌍 *Choose Your Language*\n\nPlease select your preferred language to continue:',
       'language_updated': '✅ *Language Updated Successfully*\n\n🌍 Your interface is now in {language}',
       'language_updated_loading': 'Language updated! Loading categories...',
+      'welcome_complete': '✅ *Setup Complete!*\n\nWelcome to Molotov Bot! Your language has been set to {language}.',
       'language_error': '❌ *Error Updating Language*\n\nPlease try again.',
       
       // Categories and products
@@ -65,6 +66,15 @@ class MessageTranslator {
       'bot_restarted': '🔄 *Bot Restarted*',
       'maintenance_mode': '🔧 *Maintenance Mode*',
       'service_unavailable': '⚠️ *Service Unavailable*\n\nTemporarily unavailable.',
+      
+      // Bot description and about (for setMyDescription and setMyShortDescription)
+      'bot_description': '🚀 Molotov Bot - Your premium digital marketplace for cryptocurrency products. Secure payments via Bitcoin and Litecoin. Browse verified accounts, proxy networks, phone numbers, and more. Trusted by professionals worldwide.',
+      'bot_short_description': '💎 Premium digital marketplace for crypto products. Secure, verified, trusted.',
+      'bot_about_text': '🛒 Premium Digital Marketplace\n\n💎 Molotov Bot offers exclusive digital products and services for cryptocurrency payments. We specialize in verified accounts, proxy networks, phone numbers, and premium digital tools.\n\n🔐 Secure payments via Bitcoin & Litecoin\n🌍 Worldwide trusted platform\n⚡ Instant delivery\n🛡️ Professional support',
+      
+      // Command descriptions for bot menu
+      'command_start_desc': 'Start shopping and browse categories',
+      'command_help_desc': 'Get help and contact support',
       
       // Payment specific messages
       'order_summary': 'Order Summary',
@@ -352,6 +362,67 @@ class MessageTranslator {
     
     const emoji = statusEmojis[status] || '❓';
     return `${emoji} ${status}`;
+  }
+
+    // Update bot description and short description based on language
+  async updateBotDescription(bot, languageCode = 'en') {
+    try {
+      // Get translated descriptions
+      const description = await this.translateTemplate('bot_description', languageCode);
+      const shortDescription = await this.translateTemplate('bot_short_description', languageCode);
+      const aboutText = await this.translateTemplate('bot_about_text', languageCode);
+      
+      // Update bot description (appears in bot profile)
+      await bot.setMyDescription({
+        description: description,
+        language_code: languageCode
+      });
+      
+      // Update bot short description (appears in search results)
+      await bot.setMyShortDescription({
+        short_description: shortDescription,
+        language_code: languageCode
+      });
+
+      // Set commands with descriptions for this language
+      const commands = [
+        {
+          command: 'start',
+          description: await this.translateTemplate('command_start_desc', languageCode)
+        },
+        {
+          command: 'help',
+          description: await this.translateTemplate('command_help_desc', languageCode)
+        }
+      ];
+
+      await bot.setMyCommands(commands, {
+        language_code: languageCode
+      });
+      
+      logger.debug('BOT_INFO', `Updated bot info for language: ${languageCode}`);
+      return true;
+    } catch (error) {
+      logger.error('BOT_INFO', `Failed to update bot info for ${languageCode}`, error);
+      return false;
+    }
+  }
+
+  // Update bot descriptions for all supported languages
+  async updateBotDescriptionsForAllLanguages(bot) {
+    const supportedLanguages = translationService.getSupportedLanguages();
+    const results = [];
+    
+    for (const [langCode] of Object.entries(supportedLanguages)) {
+      const success = await this.updateBotDescription(bot, langCode);
+      results.push({ language: langCode, success });
+      
+      // Small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    logger.info('BOT_INFO', `Updated bot descriptions for ${results.length} languages`);
+    return results;
   }
 }
 

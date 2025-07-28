@@ -146,7 +146,7 @@ async function initializeBot() {
     
     // Cleanup tasks
     setInterval(() => {
-      logger.cleanupOldLogs(30); // Keep logs for 30 days
+      logger.cleanupOldLogs(7); // Keep logs for 7 days
       stateManager.cleanup(); // Cleanup expired state
       pinManager.cleanupExpiredSessions(); // Cleanup expired PIN sessions
     }, 3600000); // Every hour
@@ -157,6 +157,18 @@ async function initializeBot() {
     }, 86400000); // Every 24 hours
     
     logger.info('SYSTEM', 'Bot initialization completed successfully');
+    
+    // Update bot descriptions for all supported languages (non-blocking)
+    logger.info('SYSTEM', 'Updating bot descriptions for all supported languages...');
+    messageTranslator.updateBotDescriptionsForAllLanguages(bot)
+      .then(results => {
+        const successCount = results.filter(r => r.success).length;
+        logger.info('SYSTEM', `Bot descriptions updated: ${successCount}/${results.length} languages successful`);
+      })
+      .catch(error => {
+        logger.warn('SYSTEM', 'Bot description update failed (non-critical)', error);
+      });
+    
     console.log('[✅] Telegram Digital Store is live with full Sidekick System.');
     console.log('[🚀] All features are production-ready and encrypted.');
     console.log('[🔐] Database migrations completed - backward compatible.');
@@ -335,6 +347,31 @@ bot.sendMessage(
 
 // === COMMANDS ===
 bot.onText(/\/start/, (msg) => handleStart(bot, msg));
+bot.onText(/\/help/, async (msg) => {
+  const userId = msg.from.id;
+  const helpText = await messageTranslator.translateTemplateForUser('bot_about_text', userId);
+  const supportText = await messageTranslator.translateTemplateForUser('contact_admin', userId);
+  const { SUPPORT_USERNAME } = await import('./config.js');
+  
+  await bot.sendMessage(msg.chat.id, 
+    `${helpText}\n\n📞 ${supportText}: @${SUPPORT_USERNAME || 'nova_chok'}`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ 
+            text: await messageTranslator.translateTemplateForUser('browse_categories_button', userId), 
+            callback_data: 'load_categories' 
+          }],
+          [{ 
+            text: await messageTranslator.translateTemplateForUser('contact_admin', userId), 
+            url: `https://t.me/${SUPPORT_USERNAME || 'nova_chok'}` 
+          }]
+        ]
+      }
+    }
+  );
+});
 bot.onText(/^\/(addcategory|addsubcategory|addproduct)(.*)/, (msg) => {
   handleAdminCommand(bot, msg);
 });
@@ -372,11 +409,11 @@ bot.on('callback_query', async (query) => {
   const userId = query.from.id;
 
   // Enhanced logging for debugging
-  console.log(`[CALLBACK] User ${userId} clicked: "${data}"`);
-  logger.info('CALLBACK', `User ${userId} executed callback: ${data}`);
+  logger.debug('CALLBACK', `User ${userId} triggered callback: ${data}`);
 
   try {
     if (!data) {
+      logger.warn('CALLBACK', `Invalid callback data from user ${userId}`);
       return await messageTranslator.answerTranslatedCallback(bot, query.id, 'Invalid callback data.', userId);
     }
 
@@ -386,6 +423,7 @@ bot.on('callback_query', async (query) => {
     const now = Date.now();
     
     if (lastCall && now - lastCall < 1000) { // 1 second cooldown
+      logger.warn('CALLBACK', `Rate limit exceeded for user ${userId}, action: ${data}`);
       return await messageTranslator.answerTranslatedCallback(bot, query.id, 'please_wait', userId);
     }
     
@@ -554,16 +592,11 @@ bot.on('callback_query', async (query) => {
     }
 
     // Fallback for unknown callbacks - Add more specific error handling
-    console.warn('[Callback] Unknown callback data:', data);
+    logger.warn('CALLBACK', `Unknown callback from user ${userId}: ${data}`);
     return await messageTranslator.answerTranslatedCallback(bot, query.id, 'unknown_action', userId);
 
   } catch (err) {
-    console.error('[Callback Error]', {
-      userId: userId,
-      data: data,
-      error: err.message,
-      stack: err.stack
-    });
+    logger.error('CALLBACK', `Callback error for user ${userId}, action: ${data}`, err);
     return await messageTranslator.answerTranslatedCallback(bot, query.id, 'error_processing', userId);
   }
 });
@@ -571,12 +604,13 @@ bot.on('callback_query', async (query) => {
 // === RAW MESSAGES ===
 bot.on('message', async (msg) => {
   const { text, document, photo } = msg;
+  const userId = msg.from?.id;
+  const chatId = msg.chat?.id;
 
-  console.log('[DEBUG] Message received:', {
+  logger.debug('MESSAGE', `Message received from user ${userId}`, {
     hasReply: !!msg.reply_to_message,
-    replyText: msg.reply_to_message?.text?.substring(0, 50),
     messageType: document ? 'document' : photo ? 'photo' : text ? 'text' : 'other',
-    chatId: msg.chat.id
+    chatId: chatId
   });
 
   // Handle buyer reply to admin (if user is in reply mode)
@@ -657,24 +691,24 @@ bot.on('message', async (msg) => {
 
   // Handle product delivery uploads (files, photos, and text)
   if (msg.reply_to_message && msg.reply_to_message.text?.includes('Please Upload Product Details')) {
-    console.log('[DEBUG] Product delivery detected, full reply text:', msg.reply_to_message.text);
+    logger.info('DELIVERY', `Product delivery detected from user ${userId}`);
     // Try multiple regex patterns to match different formats
     const orderIdMatch = msg.reply_to_message.text.match(/Order ID: #(\d+)/) ||
       msg.reply_to_message.text.match(/Order ID: \*#(\d+)\*/) ||
       msg.reply_to_message.text.match(/#(\d+)/);
-    console.log('[DEBUG] Order ID match:', orderIdMatch);
+    
     if (orderIdMatch) {
-      console.log('[DEBUG] Processing delivery for order:', orderIdMatch[1]);
+      logger.info('DELIVERY', `Processing delivery for order ${orderIdMatch[1]} from user ${userId}`);
       return await handleProductDelivery(bot, msg, orderIdMatch[1]);
     } else {
-      console.log('[DEBUG] No order ID found in reply text');
+      logger.warn('DELIVERY', `No order ID found in delivery reply from user ${userId}`);
       return await bot.sendMessage(msg.chat.id, '❌ Could not find order ID in the message you replied to.');
     }
   }
 
   // Handle admin replies to delivery confirmation messages
   if (msg.reply_to_message && msg.reply_to_message.text?.includes('Product Delivered Successfully')) {
-    console.log('[DEBUG] Delivery reply detected');
+    logger.info('DELIVERY', `Delivery reply detected from user ${userId}`);
     const wasHandled = await handleDeliveryReply(bot, msg);
     if (wasHandled) {
       return; // Message was handled as delivery reply
@@ -689,22 +723,31 @@ bot.on('message', async (msg) => {
     try {
       // Check for poke input first
       const pokeHandled = await handlePokeInput(bot, msg);
-      if (pokeHandled) return;
+      if (pokeHandled) {
+        logger.debug('INPUT', `Poke input handled for user ${userId}`);
+        return;
+      }
 
       // Check for sidekick input first
       if (sidekickInputHandler) {
         const sidekickHandled = await sidekickInputHandler.handleInput(msg);
-        if (sidekickHandled) return;
+        if (sidekickHandled) {
+          logger.debug('INPUT', `Sidekick input handled for user ${userId}`);
+          return;
+        }
       }
 
       // Check for news message input
       const { handleNewsMessageInput } = await import('./handlers/newsHandler.js');
-      await handleNewsMessageInput(bot, msg);
+      const newsHandled = await handleNewsMessageInput(bot, msg);
+      if (newsHandled) {
+        logger.debug('INPUT', `News input handled for user ${userId}`);
+      }
 
       // Then check for wallet input
       await handleWalletInput(bot, msg);
     } catch (err) {
-      console.error('[Input Handler Error]', err.message);
+      logger.error('INPUT', `Input handler error for user ${userId}`, err);
     }
     return;
   }
@@ -712,6 +755,6 @@ bot.on('message', async (msg) => {
   try {
     // Future: await handleAdminInput(bot, msg);
   } catch (err) {
-    console.error('[Message Error]', err.message);
+    logger.error('MESSAGE', `Message processing error for user ${userId}`, err);
   }
 });

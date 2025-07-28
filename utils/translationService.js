@@ -5,7 +5,9 @@ import db from '../database.js';
 class TranslationService {
   constructor() {
     this.libretranslateUrl = 'http://localhost:5000';
-    this.supportedLanguages = {
+    
+    // All available languages with their metadata
+    this.allLanguages = {
       'en': { name: 'English', flag: '🇺🇸' },
       'ru': { name: 'Русский', flag: '🇷🇺' },
       'zh': { name: '中文', flag: '🇨🇳' },
@@ -25,8 +27,13 @@ class TranslationService {
       'no': { name: 'Norsk', flag: '🇳🇴' },
       'da': { name: 'Dansk', flag: '🇩🇰' },
       'fi': { name: 'Suomi', flag: '🇫🇮' },
-      'uk': { name: 'Українська', flag: '🇺🇦' }
+      'uk': { name: 'Українська', flag: '🇺🇦' },
+      'cs': { name: 'Čeština', flag: '🇨🇿' },
+      'el': { name: 'Ελληνικά', flag: '🇬🇷' }
     };
+    
+    // Get supported languages from environment, always include English
+    this.supportedLanguages = this.getSupportedLanguagesFromEnv();
     
     // Cache for translations to reduce API calls
     this.translationCache = new Map();
@@ -297,6 +304,32 @@ class TranslationService {
       }
     }
     logger.debug('TRANSLATION', `Cache cleanup: ${this.translationCache.size} entries remaining`);
+  }
+
+  // Get supported languages from environment
+  getSupportedLanguagesFromEnv() {
+    const envLanguages = process.env.SUPPORTED_LANGUAGES;
+    const supported = { 'en': this.allLanguages['en'] }; // Always include English
+    
+    if (envLanguages) {
+      const langCodes = envLanguages.split(',').map(lang => lang.trim()).filter(lang => lang);
+      
+      langCodes.forEach(code => {
+        if (this.allLanguages[code] && code !== 'en') {
+          supported[code] = this.allLanguages[code];
+        }
+      });
+    } else {
+      // Fallback to a basic set if no env variable
+      const fallbackLangs = ['es', 'fr', 'de', 'it', 'pt', 'ru', 'zh', 'ja'];
+      fallbackLangs.forEach(code => {
+        if (this.allLanguages[code]) {
+          supported[code] = this.allLanguages[code];
+        }
+      });
+    }
+    
+    return supported;
   }
 
   // Batch translate multiple texts

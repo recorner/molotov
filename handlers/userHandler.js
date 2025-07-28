@@ -4,13 +4,18 @@ import { notifyGroup, notifyNewUser } from '../utils/notifyGroup.js';
 import translationService from '../utils/translationService.js';
 import messageTranslator from '../utils/messageTranslator.js';
 import instantTranslationService from '../utils/instantTranslationService.js';
+import { SUPPORT_USERNAME } from '../config.js';
+import logger from '../utils/logger.js';
 
 export function handleStart(bot, msg) {
   const userId = msg.from.id;
   const { first_name, last_name, username, language_code } = msg.from;
 
+  logger.info('USER', `Start command received from user ${userId} (@${username || 'no_username'})`);
+
   // ❌ Reject users without a Telegram @username
   if (!username) {
+    logger.warn('USER', `Access denied for user ${userId}: No username set`);
     return messageTranslator.sendTranslatedMessage(bot, userId,
       '⚠️ You must set a Telegram username in your settings to use this bot.\n\n' +
       'Please go to Telegram Settings → Edit Profile → Set Username.\nThen restart the bot.'
@@ -23,13 +28,15 @@ export function handleStart(bot, msg) {
     [userId],
     async (err, row) => {
       if (err) {
-        console.error('[DB] User query error:', err.message);
+        logger.error('USER', `Database error during user lookup for ${userId}`, err);
         return;
       }
 
       const isNewUser = !row;
 
       if (isNewUser) {
+        logger.info('USER', `New user registration: ${userId} (@${username})`);
+        
         // For new users, show language selection first
         const languageMessage = await messageTranslator.createLanguageSelectionMessage(userId);
         
@@ -49,9 +56,10 @@ export function handleStart(bot, msg) {
           [userId, first_name, last_name, username, language_code || 'en', new Date().toISOString()],
           (err) => {
             if (err) {
-              console.error('[DB] User insert error:', err.message);
+              logger.error('USER', `Failed to insert new user ${userId}`, err);
               return;
             }
+            logger.info('USER', `User ${userId} (@${username}) registered successfully`);
             // Note: User notification will be sent after language selection
           }
         );
@@ -60,11 +68,14 @@ export function handleStart(bot, msg) {
       }
 
       // For existing users, update last activity and show categories
+      logger.debug('USER', `Existing user ${userId} (@${username}) accessed bot`);
       db.run(
         'UPDATE users SET last_activity = ? WHERE telegram_id = ?',
         [new Date().toISOString(), userId],
         (err) => {
-          if (err) console.error('[DB] Activity update error:', err.message);
+          if (err) {
+            logger.error('USER', `Failed to update last activity for user ${userId}`, err);
+          }
         }
       );
 
@@ -76,9 +87,16 @@ export function handleStart(bot, msg) {
 
 // Function to show categories menu with translation
 export async function showCategoriesMenu(bot, userId, isWelcome = true) {
+  logger.debug('USER', `Showing categories menu for user ${userId}, welcome: ${isWelcome}`);
+  
   try {
     // Get user info for personalized greeting
     db.get('SELECT first_name FROM users WHERE telegram_id = ?', [userId], async (err, user) => {
+      if (err) {
+        logger.error('USER', `Failed to fetch user info for ${userId}`, err);
+        return;
+      }
+      
       const firstName = user?.first_name || 'there';
       
       if (isWelcome) {
@@ -99,7 +117,7 @@ export async function showCategoriesMenu(bot, userId, isWelcome = true) {
               }],
               [{ 
                 text: await messageTranslator.translateTemplateForUser('contact_admin', userId), 
-                url: 'https://t.me/nova_chok' 
+                url: `https://t.me/${SUPPORT_USERNAME || 'nova_chok'}` 
               }],
               [{ 
                 text: await messageTranslator.translateTemplateForUser('change_language', userId), 
@@ -116,13 +134,16 @@ export async function showCategoriesMenu(bot, userId, isWelcome = true) {
         [],
         async (err, rows) => {
           if (err) {
-            console.error('[DB] Category Fetch Error:', err.message);
+            logger.error('USER', `Failed to fetch categories for user ${userId}`, err);
             return messageTranslator.sendTranslatedMessage(bot, userId, 'error_loading');
           }
 
           if (rows.length === 0) {
+            logger.warn('USER', `No categories found for user ${userId}`);
             return messageTranslator.sendTranslatedMessage(bot, userId, 'no_categories');
           }
+
+          logger.debug('USER', `Displaying ${rows.length} categories to user ${userId}`);
 
           const buttons = [];
           
@@ -139,7 +160,7 @@ export async function showCategoriesMenu(bot, userId, isWelcome = true) {
           buttons.push([
             { 
               text: await messageTranslator.translateTemplateForUser('contact_admin', userId), 
-              url: 'https://t.me/nova_chok' 
+              url: `https://t.me/${SUPPORT_USERNAME || 'nova_chok'}` 
             }
           ]);
           
@@ -160,7 +181,7 @@ export async function showCategoriesMenu(bot, userId, isWelcome = true) {
       );
     });
   } catch (error) {
-    console.error('[Categories Menu Error]', error);
+    logger.error('USER', `Error in showCategoriesMenu for user ${userId}`, error);
     bot.sendMessage(userId, '❌ Error loading categories.');
   }
 }
@@ -173,13 +194,20 @@ export async function handleLanguageSelection(bot, query) {
   if (!data.startsWith('lang_')) return false;
   
   const languageCode = data.split('_')[1];
+  logger.info('USER', `Language selection: ${userId} chose ${languageCode}`);
   
   try {
     await translationService.setUserLanguage(userId, languageCode);
     
+    // Update bot description for this language if it's the first time
+    messageTranslator.updateBotDescription(bot, languageCode).catch(err => {
+      logger.warn('USER', `Failed to update bot description for ${languageCode}`, err);
+    });
+    
     // Send enhanced user joined notification with PM links
     db.get('SELECT first_name, last_name, username FROM users WHERE telegram_id = ?', [userId], (err, user) => {
       if (!err && user) {
+        logger.info('USER', `Sending new user notification for ${userId} (@${user.username})`);
         notifyNewUser(bot, {
           userId: userId,
           firstName: user.first_name,
@@ -188,6 +216,8 @@ export async function handleLanguageSelection(bot, query) {
           languageCode: languageCode,
           joinTime: new Date().toLocaleString()
         });
+      } else if (err) {
+        logger.error('USER', `Failed to fetch user data for notification ${userId}`, err);
       }
     });
     
@@ -198,14 +228,21 @@ export async function handleLanguageSelection(bot, query) {
       { language: langInfo?.name || languageCode }
     );
     
+    // Use a simple callback answer instead of alert popup
     await bot.answerCallbackQuery(query.id, {
-      text: successMessage,
-      show_alert: true
+      text: `✅ ${langInfo?.flag || ''} ${successMessage}`,
+      show_alert: false // This makes it a top notification instead of popup
     });
 
-    // Update the message to show categories
+    // Smoothly transition to categories menu by editing the message
+    const welcomeText = await messageTranslator.translateTemplateForUser(
+      'welcome_complete', 
+      userId, 
+      { language: langInfo?.name || languageCode }
+    );
+
     await bot.editMessageText(
-      await messageTranslator.translateTemplateForUser('language_updated_loading', userId),
+      `🎉 ${welcomeText}\n\n⚡ *Loading your marketplace...*`,
       {
         chat_id: message.chat.id,
         message_id: message.message_id,
@@ -213,18 +250,29 @@ export async function handleLanguageSelection(bot, query) {
       }
     );
 
-    // Show categories menu after a short delay
+    // Show categories menu after a brief moment for smooth transition
     setTimeout(async () => {
-      await showCategoriesMenu(bot, userId, true);
-    }, 1000);
+      try {
+        // Delete the loading message
+        await bot.deleteMessage(message.chat.id, message.message_id);
+        
+        // Show the categories menu
+        await showCategoriesMenu(bot, userId, true);
+        logger.info('USER', `Successfully completed onboarding for user ${userId}`);
+      } catch (error) {
+        logger.error('USER', `Error in language selection transition for user ${userId}`, error);
+        // Fallback: just show categories without deleting
+        await showCategoriesMenu(bot, userId, true);
+      }
+    }, 1500);
 
     return true;
     
   } catch (error) {
-    console.error('[Language Selection Error]', error);
+    logger.error('USER', `Language selection error for user ${userId}`, error);
     await bot.answerCallbackQuery(query.id, {
       text: await messageTranslator.translateTemplateForUser('language_error', userId),
-      show_alert: true
+      show_alert: false
     });
     return true;
   }
