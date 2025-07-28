@@ -5,7 +5,6 @@ import logger from './logger.js';
 /**
  * Auto Vouch Channel Manager
  * Posts clean success messages when orders are completed
- * Uses real customer names for authentic social proof
  */
 class VouchChannelManager {
   constructor() {
@@ -131,14 +130,6 @@ class VouchChannelManager {
       const testMessage = `🧪 **Vouch Channel Test**\n\n` +
                          `✅ Bot has access to this channel\n` +
                          `🕒 Test Time: ${new Date().toLocaleString()}\n\n` +
-                         `📝 **Sample Vouch Message:**\n` +
-                         `✅ Order Completed Successfully\n` +
-                         `🧾 Order ID: #TEST\n` +
-                         `🛍️ Product: Test Product\n` +
-                         `💰 Amount: $0.01 ₿BTC\n` +
-                         `👤 Customer: Test User\n` +
-                         `📄 Delivery: Test\n` +
-                         `🕒 Completed: ${new Date().toLocaleString()}\n\n` +
                          `━━━━━━━━━━━━━━━━━━━━━\n` +
                          `This message confirms the vouch channel is working correctly.`;
 
