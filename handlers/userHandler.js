@@ -6,6 +6,7 @@ import messageTranslator from '../utils/messageTranslator.js';
 import instantTranslationService from '../utils/instantTranslationService.js';
 import { SUPPORT_USERNAME } from '../config.js';
 import logger from '../utils/logger.js';
+import smartMessageManager from '../utils/smartMessageManager.js';
 
 export function handleStart(bot, msg) {
   const userId = msg.from.id;
@@ -37,15 +38,14 @@ export function handleStart(bot, msg) {
       if (isNewUser) {
         logger.info('USER', `New user registration: ${userId} (@${username})`);
         
-        // For new users, show language selection first
+        // For new users, show language selection first with banner
         const languageMessage = await messageTranslator.createLanguageSelectionMessage(userId);
         
-        await bot.sendMessage(userId,
+        await messageTranslator.sendBannerWithMessage(bot, userId,
           `👋 *Welcome to Molotov Bot!* 🚀\n\n` +
           `🌍 *Premium Digital Marketplace*\n\n` +
           `Please select your preferred language to continue:`,
           {
-            parse_mode: 'Markdown',
             reply_markup: languageMessage.reply_markup
           }
         );
@@ -100,15 +100,11 @@ export async function showCategoriesMenu(bot, userId, isWelcome = true) {
       const firstName = user?.first_name || 'there';
       
       if (isWelcome) {
-        // Send welcome message using template
-        const welcomeText = await messageTranslator.translateTemplateForUser(
-          'welcome_back_message',
-          userId,
-          { firstName: firstName }
-        );
-
-        await bot.sendMessage(userId, welcomeText, {
-          parse_mode: 'Markdown',
+        // Send welcome message with banner using template
+        // Send welcome back message - force banner for welcome experience
+        smartMessageManager.forceBannerNext(userId); // Allow banner for welcome
+        await smartMessageManager.sendOrEditSmart(bot, userId, null, 
+          await messageTranslator.translateTemplateForUser('welcome_back_message', userId, { firstName: firstName }), {
           reply_markup: {
             inline_keyboard: [
               [{ 
@@ -125,60 +121,62 @@ export async function showCategoriesMenu(bot, userId, isWelcome = true) {
               }]
             ]
           }
-        });
+        }, true); // Force banner
       }
 
-      // Show categories
-      db.all(
-        'SELECT * FROM categories WHERE parent_id IS NULL',
-        [],
-        async (err, rows) => {
-          if (err) {
-            logger.error('USER', `Failed to fetch categories for user ${userId}`, err);
-            return messageTranslator.sendTranslatedMessage(bot, userId, 'error_loading');
-          }
-
-          if (rows.length === 0) {
-            logger.warn('USER', `No categories found for user ${userId}`);
-            return messageTranslator.sendTranslatedMessage(bot, userId, 'no_categories');
-          }
-
-          logger.debug('USER', `Displaying ${rows.length} categories to user ${userId}`);
-
-          const buttons = [];
-          
-          // Translate category names and create buttons
-          for (const row of rows) {
-            const translatedName = await instantTranslationService.getTranslation(row.name, userId);
-            buttons.push([{
-              text: `📂 ${translatedName}`,
-              callback_data: `cat_${row.id}`
-            }]);
-          }
-
-          // Add admin contact and language change buttons
-          buttons.push([
-            { 
-              text: await messageTranslator.translateTemplateForUser('contact_admin', userId), 
-              url: `https://t.me/${SUPPORT_USERNAME || 'nova_chok'}` 
+      // Only show categories list when NOT showing welcome (i.e., when user clicks Browse Categories)
+      if (!isWelcome) {
+        db.all(
+          'SELECT * FROM categories WHERE parent_id IS NULL',
+          [],
+          async (err, rows) => {
+            if (err) {
+              logger.error('USER', `Failed to fetch categories for user ${userId}`, err);
+              return messageTranslator.sendTranslatedMessage(bot, userId, 'error_loading');
             }
-          ]);
-          
-          buttons.push([
-            { 
-              text: await messageTranslator.translateTemplateForUser('change_language', userId), 
-              callback_data: 'change_language' 
-            }
-          ]);
 
-          const categoryMessage = await messageTranslator.translateTemplateForUser('select_category', userId);
-          
-          bot.sendMessage(userId, `🛍️ ${categoryMessage}`, {
-            parse_mode: 'Markdown',
-            reply_markup: { inline_keyboard: buttons }
-          });
-        }
-      );
+            if (rows.length === 0) {
+              logger.warn('USER', `No categories found for user ${userId}`);
+              return messageTranslator.sendTranslatedMessage(bot, userId, 'no_categories');
+            }
+
+            logger.debug('USER', `Displaying ${rows.length} categories to user ${userId}`);
+
+            const buttons = [];
+            
+            // Translate category names and create buttons
+            for (const row of rows) {
+              const translatedName = await instantTranslationService.getTranslation(row.name, userId);
+              buttons.push([{
+                text: `📂 ${translatedName}`,
+                callback_data: `cat_${row.id}`
+              }]);
+            }
+
+            // Add admin contact and language change buttons
+            buttons.push([
+              { 
+                text: await messageTranslator.translateTemplateForUser('contact_admin', userId), 
+                url: `https://t.me/${SUPPORT_USERNAME || 'nova_chok'}` 
+              }
+            ]);
+            
+            buttons.push([
+              { 
+                text: await messageTranslator.translateTemplateForUser('change_language', userId), 
+                callback_data: 'change_language' 
+              }
+            ]);
+
+            const categoryMessage = await messageTranslator.translateTemplateForUser('select_category', userId);
+            
+            // Use smart messaging - categories are important so allow banner but with cooldown
+            await smartMessageManager.sendOrEditSmart(bot, userId, null, `🛍️ ${categoryMessage}`, {
+              reply_markup: { inline_keyboard: buttons }
+            }, true); // Force banner for categories
+          }
+        );
+      }
     });
   } catch (error) {
     logger.error('USER', `Error in showCategoriesMenu for user ${userId}`, error);
@@ -234,29 +232,22 @@ export async function handleLanguageSelection(bot, query) {
       show_alert: false // This makes it a top notification instead of popup
     });
 
-    // Smoothly transition to categories menu by editing the message
+    // Smoothly transition to categories menu with banner
     const welcomeText = await messageTranslator.translateTemplateForUser(
       'welcome_complete', 
       userId, 
       { language: langInfo?.name || languageCode }
     );
 
-    await bot.editMessageText(
-      `🎉 ${welcomeText}\n\n⚡ *Loading your marketplace...*`,
-      {
-        chat_id: message.chat.id,
-        message_id: message.message_id,
-        parse_mode: 'Markdown'
-      }
+    // Send loading message with banner
+    await messageTranslator.sendBannerWithMessage(bot, message.chat.id, 
+      `🎉 ${welcomeText}\n\n⚡ *Loading your marketplace...*`
     );
 
     // Show categories menu after a brief moment for smooth transition
     setTimeout(async () => {
       try {
-        // Delete the loading message
-        await bot.deleteMessage(message.chat.id, message.message_id);
-        
-        // Show the categories menu
+        // Show the categories menu with banner
         await showCategoriesMenu(bot, userId, true);
         logger.info('USER', `Successfully completed onboarding for user ${userId}`);
       } catch (error) {

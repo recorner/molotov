@@ -4,6 +4,7 @@ import db from '../database.js';
 import { formatTimeAgo } from '../utils/date.js';
 import { ADMIN_IDS } from '../config.js';
 import { handleAdminCommand } from './adminHandler.js';
+import { safeEditMessage } from '../utils/safeMessageEdit.js';
 
 const activeWalletUpdate = {};
 function validateAddress(address, currency) {
@@ -29,7 +30,7 @@ export async function handleWalletCallback(bot, query) {
       )
     `, (err, rows) => {
             if (err) return bot.answerCallbackQuery(query.id, { text: '❌ DB Error' });
-            if (!rows?.length) return bot.editMessageText('❌ No wallet addresses found.', { chat_id: chatId, message_id: messageId });
+            if (!rows?.length) return safeEditMessage(bot, chatId, messageId, '❌ No wallet addresses found.');
 
             const output = rows.map(row => (
                 `💱 *${row.currency}*
@@ -43,11 +44,9 @@ export async function handleWalletCallback(bot, query) {
                 `• ⏱️ ${formatTimeAgo(row.added_at)}`
             )).join('\n\n');
 
-            bot.editMessageText(`🧾 *Active Wallet Addresses:*
+            safeEditMessage(bot, chatId, messageId, `🧾 *Active Wallet Addresses:*
 
 ${output}`, {
-                chat_id: chatId,
-                message_id: messageId,
                 parse_mode: 'Markdown',
                 reply_markup: {
                     inline_keyboard: [
@@ -75,9 +74,7 @@ ${output}`, {
       }
 
       if (!rows.length) {
-        return bot.editMessageText(`📭 No history found for *${currency}*.`, {
-          chat_id: chatId,
-          message_id: messageId,
+        return safeEditMessage(bot, chatId, messageId, `📭 No history found for *${currency}*.`, {
           parse_mode: 'Markdown'
         });
       }
@@ -90,9 +87,7 @@ ${output}`, {
         `• ⏱️ ${formatTimeAgo(r.added_at)}`
       ).join('\n\n');
 
-      return bot.editMessageText(`📜 *${currency} Wallet History:*\n\n${history}`, {
-        chat_id: chatId,
-        message_id: messageId,
+      return safeEditMessage(bot, chatId, messageId, `📜 *${currency} Wallet History:*\n\n${history}`, {
         parse_mode: 'Markdown',
         reply_markup: {
           inline_keyboard: [
@@ -108,18 +103,13 @@ ${output}`, {
       else if (data === 'wallet_history') {
     db.all(`SELECT DISTINCT currency FROM wallet_addresses`, (err, rows) => {
       if (err || !rows.length) {
-        return bot.editMessageText('📭 No currencies available.', {
-          chat_id: chatId,
-          message_id: messageId
-        });
+        return safeEditMessage(bot, chatId, messageId, '📭 No currencies available.');
       }
 
       const buttons = rows.map(r => [{ text: `📜 ${r.currency}`, callback_data: `wallet_history_${r.currency}` }]);
       buttons.push([{ text: '🔙 Back', callback_data: 'panel_address' }]);
 
-      return bot.editMessageText('📊 *Select currency to view history:*', {
-        chat_id: chatId,
-        message_id: messageId,
+      return safeEditMessage(bot, chatId, messageId, '📊 *Select currency to view history:*', {
         parse_mode: 'Markdown',
         reply_markup: { inline_keyboard: buttons }
       });
@@ -134,18 +124,13 @@ ${output}`, {
       WHERE currency = ?
       ORDER BY added_at DESC LIMIT 10`, [currency], (err, rows) => {
             if (err || !rows.length) {
-                return bot.editMessageText(`❌ No history for ${currency}.`, {
-                    chat_id: chatId,
-                    message_id: messageId
-                });
+                return safeEditMessage(bot, chatId, messageId, `❌ No history for ${currency}.`);
             }
             const history = rows.map((r, i) =>
                 `#${i + 1} • \`${r.address}\`\n🏷️ ${r.label}, 🧷 ${r.tag}\n⏱️ ${formatTimeAgo(r.added_at)}`
             ).join('\n\n');
 
-            return bot.editMessageText(`📜 *${currency} Wallet History:*\n\n${history}`, {
-                chat_id: chatId,
-                message_id: messageId,
+            return safeEditMessage(bot, chatId, messageId, `📜 *${currency} Wallet History:*\n\n${history}`, {
                 parse_mode: 'Markdown',
                 reply_markup: {
                     inline_keyboard: [[{ text: '🔙 Back', callback_data: 'wallet_history' }]]
@@ -155,9 +140,7 @@ ${output}`, {
     }
 
     else if (data === 'wallet_refresh') {
-        return bot.editMessageText('♻️ *Select currency to update:*', {
-            chat_id: chatId,
-            message_id: messageId,
+        return safeEditMessage(bot, chatId, messageId, '♻️ *Select currency to update:*', {
             parse_mode: 'Markdown',
             reply_markup: {
                 inline_keyboard: [
@@ -172,11 +155,9 @@ ${output}`, {
     else if (data.startsWith('wallet_refresh_')) {
         const currency = data.split('_')[2];
         activeWalletUpdate[chatId] = { currency };
-        return bot.editMessageText(`🔁 *Updating ${currency} Wallet*
+        return safeEditMessage(bot, chatId, messageId, `🔁 *Updating ${currency} Wallet*
 
 Send the new public address:`, {
-            chat_id: chatId,
-            message_id: messageId,
             parse_mode: 'Markdown',
             reply_markup: {
                 inline_keyboard: [[{ text: '❌ Cancel', callback_data: 'wallet_cancel' }]]
@@ -273,13 +254,13 @@ export async function handleWalletFinalSave(bot, query) {
         (err) => {
             if (err) {
                 console.error('[DB] Wallet Save Error:', err.message);
-                return bot.editMessageText('❌ Failed to save wallet.', { chat_id: chatId, message_id: messageId });
+                return safeEditMessage(bot, chatId, messageId, '❌ Failed to save wallet.');
             }
 
-            bot.editMessageText(
+            safeEditMessage(bot, chatId, messageId, 
                 `✅ *Wallet Saved Successfully!*\n\n` +
                 `• 💱 *${currency}*\n• 📬 \`${address}\`\n• 🏷️ ${label}, 🧷 ${tag}`,
-                { chat_id: chatId, message_id: messageId, parse_mode: 'Markdown' }
+                { parse_mode: 'Markdown' }
             );
 
             ADMIN_IDS.forEach(id => {

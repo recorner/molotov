@@ -23,6 +23,7 @@ process.on('uncaughtException', (error) => {
 import logger from './utils/logger.js';
 import stateManager from './utils/stateManager.js';
 import { MigrationManager } from './utils/migrations.js';
+import { safeEditMessage } from './utils/safeMessageEdit.js';
 
 // Handlers
 import { showRootCategories } from './handlers/rootCategoryHandler.js';
@@ -439,11 +440,9 @@ bot.on('callback_query', async (query) => {
     // LANGUAGE SELECTION
     if (data.startsWith('lang_') || data === 'change_language') {
       if (data === 'change_language') {
-        // Show language selection menu
+        // Show language selection menu with safe editing
         const languageMessage = await messageTranslator.createLanguageSelectionMessage(userId);
-        return await bot.editMessageText(languageMessage.text, {
-          chat_id: chatId,
-          message_id: messageId,
+        return await safeEditMessage(bot, chatId, messageId, languageMessage.text, {
           parse_mode: 'Markdown',
           reply_markup: languageMessage.reply_markup
         });

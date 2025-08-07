@@ -37,6 +37,19 @@ VOUCH_CHANNEL=-100xxxxxxxxx
 BTC_ADDRESS=your_btc_address_here
 LTC_ADDRESS=your_ltc_address_here
 
+# Support username for contact
+SUPPORT_USERNAME=your_support_username
+
+# === BOT DESCRIPTION CONFIGURATION ===
+# Bot description that appears in bot profile (up to 512 characters)
+BOT_DESCRIPTION=🚀 Molotov Bot - Your premium digital marketplace for cryptocurrency products. Secure payments via Bitcoin and Litecoin. Browse verified accounts, proxy networks, phone numbers, and more. Trusted by professionals worldwide.
+
+# Short description for search results (up to 120 characters)
+BOT_SHORT_DESCRIPTION=💎 Premium digital marketplace for crypto products. Secure, verified, trusted.
+
+# Detailed about text for /help command (up to 4096 characters, use \n for line breaks)
+BOT_ABOUT_TEXT=🛒 Premium Digital Marketplace\n\n💎 Molotov Bot offers exclusive digital products and services for cryptocurrency payments. We specialize in verified accounts, proxy networks, phone numbers, and premium digital tools.\n\n🔐 Secure payments via Bitcoin & Litecoin\n🌍 Worldwide trusted platform\n⚡ Instant delivery\n🛡️ Professional support
+
 # === MONITORING SETTINGS ===
 # How often to check for new transactions (milliseconds)
 BLOCKCHAIN_CHECK_INTERVAL=30000

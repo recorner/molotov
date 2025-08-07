@@ -3,6 +3,8 @@ import db from '../database.js';
 import translationService from '../utils/translationService.js';
 import messageTranslator from '../utils/messageTranslator.js';
 import instantTranslationService from '../utils/instantTranslationService.js';
+import { safeEditMessage } from '../utils/safeMessageEdit.js';
+import smartMessageManager from '../utils/smartMessageManager.js';
 
 export async function showProductsInCategory(bot, chatId, categoryId, page = 1, messageId = null) {
   // Ensure categoryId and page are valid
@@ -91,21 +93,14 @@ export async function showProductsInCategory(bot, chatId, categoryId, page = 1, 
 
 async function sendOrEdit(bot, chatId, messageId, text, keyboard) {
   if (messageId) {
-    bot.editMessageText(text, {
-      chat_id: chatId,
-      message_id: messageId,
+    // Use safe editing for existing messages
+    await safeEditMessage(bot, chatId, messageId, text, {
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: keyboard }
-    }).catch(err => {
-      console.error('[Edit Fallback]', err.message);
-      bot.sendMessage(chatId, text, {
-        parse_mode: 'Markdown',
-        reply_markup: { inline_keyboard: keyboard }
-      });
     });
   } else {
-    bot.sendMessage(chatId, text, {
-      parse_mode: 'Markdown',
+    // Always send new product listings with banner for better UX
+    await messageTranslator.sendBannerWithMessage(bot, chatId, text, {
       reply_markup: { inline_keyboard: keyboard }
     });
   }

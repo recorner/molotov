@@ -6,6 +6,8 @@ import logger from '../utils/logger.js';
 import { notifyGroup } from '../utils/notifyGroup.js';
 import adminManager from '../utils/adminManager.js';
 import vouchChannelManager from '../utils/vouchChannel.js';
+import messageTranslator from '../utils/messageTranslator.js';
+import { safeEditMessage } from '../utils/safeMessageEdit.js';
 
 // === Handle /cocktail Command ===
 export async function handleAdminCommand(bot, msg) {
@@ -25,13 +27,12 @@ export async function handleAdminCommand(bot, msg) {
   const currentTime = new Date().toLocaleString();
   const adminName = from.first_name || 'Admin';
 
-  return bot.sendMessage(msg.chat.id, `🔧 **Molotov Admin Control Panel**\n\n` +
+  return messageTranslator.sendBannerWithMessage(bot, msg.chat.id, `🔧 **Molotov Admin Control Panel**\n\n` +
     `👋 Welcome, *${adminName}*\n` +
     `🕒 Access Time: ${currentTime}\n` +
     `🔐 Security Level: Administrator\n\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
     `Select a management section:`, {
-    parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
         [

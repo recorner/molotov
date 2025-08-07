@@ -3,6 +3,7 @@ import db from '../database.js';
 import translationService from '../utils/translationService.js';
 import messageTranslator from '../utils/messageTranslator.js';
 import instantTranslationService from '../utils/instantTranslationService.js';
+import { safeEditMessage } from '../utils/safeMessageEdit.js';
 
 export async function showRootCategories(bot, chatId, messageId = null) {
   try {
@@ -44,25 +45,11 @@ export async function showRootCategories(bot, chatId, messageId = null) {
 
       const messageText = await messageTranslator.translateTemplateForUser('main_categories', chatId);
 
-      if (messageId) {
-        bot.editMessageText(messageText, {
-          chat_id: chatId,
-          message_id: messageId,
-          parse_mode: 'Markdown',
-          reply_markup: { inline_keyboard: buttons }
-        }).catch(err => {
-          console.error('[Edit Fallback]', err.message);
-          bot.sendMessage(chatId, messageText, {
-            parse_mode: 'Markdown',
-            reply_markup: { inline_keyboard: buttons }
-          });
-        });
-      } else {
-        bot.sendMessage(chatId, messageText, {
-          parse_mode: 'Markdown',
-          reply_markup: { inline_keyboard: buttons }
-        });
-      }
+      // Always send new message with banner since we can't edit photo to photo
+      // This ensures categories always show with banner regardless of previous message type
+      await messageTranslator.sendBannerWithMessage(bot, chatId, messageText, {
+        reply_markup: { inline_keyboard: buttons }
+      });
     });
   } catch (error) {
     console.error('[Root Categories Error]', error);

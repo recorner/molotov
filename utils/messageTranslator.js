@@ -4,6 +4,7 @@ import prebuiltTranslations from './prebuiltTranslations.js';
 import instantTranslationService from './instantTranslationService.js';
 import markdownSafeTranslator from './markdownSafeTranslator.js';
 import logger from './logger.js';
+import { BOT_DESCRIPTION, BOT_SHORT_DESCRIPTION, BOT_ABOUT_TEXT } from '../config.js';
 
 class MessageTranslator {
   constructor() {
@@ -68,9 +69,9 @@ class MessageTranslator {
       'service_unavailable': '⚠️ *Service Unavailable*\n\nTemporarily unavailable.',
       
       // Bot description and about (for setMyDescription and setMyShortDescription)
-      'bot_description': '🚀 Molotov Bot - Your premium digital marketplace for cryptocurrency products. Secure payments via Bitcoin and Litecoin. Browse verified accounts, proxy networks, phone numbers, and more. Trusted by professionals worldwide.',
-      'bot_short_description': '💎 Premium digital marketplace for crypto products. Secure, verified, trusted.',
-      'bot_about_text': '🛒 Premium Digital Marketplace\n\n💎 Molotov Bot offers exclusive digital products and services for cryptocurrency payments. We specialize in verified accounts, proxy networks, phone numbers, and premium digital tools.\n\n🔐 Secure payments via Bitcoin & Litecoin\n🌍 Worldwide trusted platform\n⚡ Instant delivery\n🛡️ Professional support',
+      'bot_description': BOT_DESCRIPTION,
+      'bot_short_description': BOT_SHORT_DESCRIPTION,
+      'bot_about_text': BOT_ABOUT_TEXT,
       
       // Command descriptions for bot menu
       'command_start_desc': 'Start shopping and browse categories',
@@ -218,22 +219,9 @@ class MessageTranslator {
     }
   }
 
-  // Edit a translated message
+  // Edit a translated message with safe handling
   async editTranslatedMessage(bot, chatId, messageId, templateKeyOrText, options = {}) {
-    try {
-      const { replacements = {}, ...botOptions } = options;
-      const translatedText = await this.translateForUser(templateKeyOrText, chatId, replacements);
-      
-      return await bot.editMessageText(translatedText, {
-        chat_id: chatId,
-        message_id: messageId,
-        ...botOptions
-      });
-    } catch (error) {
-      logger.error('TRANSLATOR', 'Failed to edit translated message', error);
-      // Fallback to sending new message
-      return await this.sendTranslatedMessage(bot, chatId, templateKeyOrText, options);
-    }
+    return await this.safeEditMessage(bot, chatId, messageId, templateKeyOrText, options);
   }
 
   // Answer callback query with translation
@@ -424,9 +412,68 @@ class MessageTranslator {
     logger.info('BOT_INFO', `Updated bot descriptions for ${results.length} languages`);
     return results;
   }
+
+  // Enhanced methods for sending messages with banner image
+  async sendPhotoWithTranslatedCaption(bot, chatId, photoPath, templateKeyOrText, options = {}) {
+    try {
+      const { replacements = {}, ...botOptions } = options;
+      const translatedText = await this.translateForUser(templateKeyOrText, chatId, replacements);
+      
+      // Use simple file path approach to avoid 414 error
+      // Accept deprecation warning for now - functionality is more important
+      return await bot.sendPhoto(chatId, photoPath, {
+        caption: translatedText,
+        parse_mode: 'Markdown',
+        ...botOptions
+      });
+    } catch (error) {
+      logger.error('TRANSLATOR', `Failed to send photo with translated caption for chat ${chatId}`, error);
+      throw error;
+    }
+  }
+
+  async sendBannerWithMessage(bot, chatId, templateKeyOrText, options = {}) {
+    try {
+      const bannerPath = './assets/image.png';
+      return await this.sendPhotoWithTranslatedCaption(bot, chatId, bannerPath, templateKeyOrText, options);
+    } catch (error) {
+      logger.error('TRANSLATOR', `Failed to send banner with message for chat ${chatId}`, error);
+      // Fallback to regular text message if image fails
+      return await this.sendTranslatedMessage(bot, chatId, templateKeyOrText, options);
+    }
+  }
+
+  // Safe message editing method that handles photo-to-text conflicts
+  async safeEditMessage(bot, chatId, messageId, templateKeyOrText, options = {}) {
+    try {
+      const { replacements = {}, ...botOptions } = options;
+      const translatedText = await this.translateForUser(templateKeyOrText, chatId, replacements);
+      
+      return await bot.editMessageText(translatedText, {
+        chat_id: chatId,
+        message_id: messageId,
+        parse_mode: 'Markdown',
+        ...botOptions
+      });
+    } catch (error) {
+      // Check if it's a "no text in message to edit" error (trying to edit photo message)
+      if (error.message && error.message.includes('there is no text in the message to edit')) {
+        logger.debug('TRANSLATOR', `Cannot edit photo message to text, sending new message instead for chat ${chatId}`);
+        // Send new message instead
+        return await this.sendTranslatedMessage(bot, chatId, templateKeyOrText, options);
+      } else {
+        logger.error('TRANSLATOR', 'Failed to edit message', error);
+        // For other errors, still try to send new message as fallback
+        return await this.sendTranslatedMessage(bot, chatId, templateKeyOrText, options);
+      }
+    }
+  }
 }
 
 // Create singleton instance
 const messageTranslator = new MessageTranslator();
+
+// Make it available globally for safe editing
+global.messageTranslator = messageTranslator;
 
 export default messageTranslator;

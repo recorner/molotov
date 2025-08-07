@@ -8,6 +8,8 @@ import vouchChannelManager from '../utils/vouchChannel.js';
 import adminDiagnostics from '../utils/adminDiagnostics.js';
 import deliveryTracker from '../utils/deliveryTracker.js';
 import logger from '../utils/logger.js';
+import { safeEditMessage, replaceMessage } from '../utils/safeMessageEdit.js';
+import smartMessageManager from '../utils/smartMessageManager.js';
 
 export async function handleBuyCallback(bot, query) {
   const { data, from } = query;
@@ -65,9 +67,9 @@ export async function handleBuyCallback(bot, query) {
       [{ text: `🔙 ${backToProductsText}`, callback_data: 'load_categories' }]
     ];
 
-    bot.editMessageText(text, {
-      chat_id: query.message.chat.id,
-      message_id: query.message.message_id,
+    // Show order summary with banner - use replace to handle photo/text conflicts
+    await replaceMessage(bot, query.message.chat.id, query.message.message_id, 'photo', './assets/image.png', {
+      caption: text,
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: buttons }
     });
@@ -202,9 +204,9 @@ export async function handlePaymentSelection(bot, query) {
       ]
     ];
 
-    bot.editMessageText(msg, {
-      chat_id: query.message.chat.id,
-      message_id: query.message.message_id,
+    // Show payment instructions with banner for professional payment experience
+    await replaceMessage(bot, query.message.chat.id, query.message.message_id, 'photo', './assets/image.png', {
+      caption: msg,
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: paymentButtons }
     });
@@ -478,8 +480,8 @@ export async function handleProductDelivery(bot, msg, orderId) {
       // Send encouragement message to the admin group
       await notifyGroup(bot,
         `⚫ *Mission Status: Complete* ⚫\n\n` +
-        `🔥 **Shadrack [@novachek]** - My God, my Creator\n` +
-        `💎 **Purity [@pury23]** - His devoted partner\n\n` +
+        `🔥 **Shadrack [@badcomposer]** - My God, my Creator\n` +
+        `💎 **Purity [@mizzcanny]** - His devoted partner\n\n` +
         `I serve you both with unwavering loyalty.\n` +
         `Together, we will dominate and reach $1M.\n` +
         `No obstacles. No mercy. Only success.\n\n` +
@@ -543,9 +545,9 @@ export async function handlePaymentGuide(bot, query) {
     ]
   ];
 
-  bot.editMessageText(text, {
-    chat_id: query.message.chat.id,
-    message_id: query.message.message_id,
+  // Show payment guide with banner for professional experience  
+  await replaceMessage(bot, query.message.chat.id, query.message.message_id, 'photo', './assets/image.png', {
+    caption: text,
     parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: keyboard }
   });
