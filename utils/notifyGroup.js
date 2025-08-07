@@ -1,6 +1,7 @@
 // utils/notifyGroup.js - Enhanced admin group notification system
 import { ADMIN_GROUP } from '../config.js';
 import logger from './logger.js';
+import messageTranslator from './messageTranslator.js';
 
 export function notifyGroup(bot, message, options = {}) {
   if (!ADMIN_GROUP) {
@@ -33,7 +34,7 @@ export function notifyGroup(bot, message, options = {}) {
 }
 
 // Enhanced new user notification with PM link and admin actions
-export function notifyNewUser(bot, userInfo) {
+export async function notifyNewUser(bot, userInfo) {
   if (!ADMIN_GROUP) return;
   
   const { userId, firstName, lastName, username, languageCode, joinTime } = userInfo;
@@ -49,17 +50,17 @@ export function notifyNewUser(bot, userInfo) {
     `🕒 **Joined:** ${joinTime || new Date().toLocaleString()}\n\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
     `💡 **Quick Actions:**\n` +
-    `• Click "Send Message" to PM directly\n` +
-    `• Username link opens profile\n` +
+    `• Click "Send PM" to message directly\n` +
+    `• Click "View Profile" to see profile\n` +
     `• User is ready to browse products`;
 
-    const options = {
+  const options = {
     parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
         [
           { text: '💬 Send PM', url: `tg://user?id=${userId}` },
-          { text: '👤 View Profile', url: username ? `https://t.me/${username}` : `tg://user?id=${userId}` }
+          { text: '👤 View Profile', url: username ? `tg://resolve?domain=${username}` : `tg://user?id=${userId}` }
         ],
         [
           { text: '📊 User Analytics', callback_data: `user_analytics_${userId}` },
@@ -69,8 +70,19 @@ export function notifyNewUser(bot, userInfo) {
     }
   };
 
-  notifyGroup(bot, message, options);
-  logger.info('NOTIFY', `New user notification sent for user ${userId} (${fullName})`);
+  // Send with banner for professional admin notifications
+  try {
+    await bot.sendPhoto(ADMIN_GROUP, './assets/image.png', {
+      caption: message,
+      parse_mode: 'Markdown',
+      reply_markup: options.reply_markup
+    });
+    logger.info('NOTIFY', `New user notification with banner sent for user ${userId} (${fullName})`);
+  } catch (error) {
+    // Fallback to text message if photo fails
+    logger.warn('NOTIFY', `Banner failed for new user notification, falling back to text`, error);
+    notifyGroup(bot, message, options);
+  }
 }
 
 // Helper function to get language information

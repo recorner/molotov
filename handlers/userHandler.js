@@ -203,10 +203,10 @@ export async function handleLanguageSelection(bot, query) {
     });
     
     // Send enhanced user joined notification with PM links
-    db.get('SELECT first_name, last_name, username FROM users WHERE telegram_id = ?', [userId], (err, user) => {
+    db.get('SELECT first_name, last_name, username FROM users WHERE telegram_id = ?', [userId], async (err, user) => {
       if (!err && user) {
         logger.info('USER', `Sending new user notification for ${userId} (@${user.username})`);
-        notifyNewUser(bot, {
+        await notifyNewUser(bot, {
           userId: userId,
           firstName: user.first_name,
           lastName: user.last_name,
