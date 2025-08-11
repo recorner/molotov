@@ -1,9 +1,10 @@
-// handlers/rootCategoryHandler.js - Enhanced with multi-language support
+// handlers/rootCategoryHandler.js - Enhanced with multi-language support and smart message editing
 import db from '../database.js';
 import translationService from '../utils/translationService.js';
 import messageTranslator from '../utils/messageTranslator.js';
 import instantTranslationService from '../utils/instantTranslationService.js';
 import { safeEditMessage } from '../utils/safeMessageEdit.js';
+import smartMessageManager from '../utils/smartMessageManager.js';
 
 export async function showRootCategories(bot, chatId, messageId = null) {
   try {
@@ -45,11 +46,23 @@ export async function showRootCategories(bot, chatId, messageId = null) {
 
       const messageText = await messageTranslator.translateTemplateForUser('main_categories', chatId);
 
-      // Always send new message with banner since we can't edit photo to photo
-      // This ensures categories always show with banner regardless of previous message type
-      await messageTranslator.sendBannerWithMessage(bot, chatId, messageText, {
-        reply_markup: { inline_keyboard: buttons }
-      });
+      // Use smart message manager for better UX
+      if (messageId) {
+        // Edit existing message intelligently - preserve photo if it exists
+        await smartMessageManager.sendOrEditSmart(bot, chatId, messageId, messageText, {
+          reply_markup: { inline_keyboard: buttons }
+        }, true); // Force banner for main categories
+      } else {
+        // Send new message with banner
+        const result = await smartMessageManager.sendOrEditSmart(bot, chatId, null, messageText, {
+          reply_markup: { inline_keyboard: buttons }
+        }, true);
+        
+        // Track that this message has a photo banner
+        if (result && result.message_id) {
+          smartMessageManager.markAsPhotoMessage(chatId, result.message_id);
+        }
+      }
     });
   } catch (error) {
     console.error('[Root Categories Error]', error);

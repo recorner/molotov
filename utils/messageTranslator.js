@@ -443,7 +443,7 @@ class MessageTranslator {
     }
   }
 
-  // Safe message editing method that handles photo-to-text conflicts
+  // Safe message editing method that handles photo-to-text conflicts intelligently
   async safeEditMessage(bot, chatId, messageId, templateKeyOrText, options = {}) {
     try {
       const { replacements = {}, ...botOptions } = options;
@@ -458,9 +458,25 @@ class MessageTranslator {
     } catch (error) {
       // Check if it's a "no text in message to edit" error (trying to edit photo message)
       if (error.message && error.message.includes('there is no text in the message to edit')) {
-        logger.debug('TRANSLATOR', `Cannot edit photo message to text, sending new message instead for chat ${chatId}`);
-        // Send new message instead
-        return await this.sendTranslatedMessage(bot, chatId, templateKeyOrText, options);
+        logger.debug('TRANSLATOR', `Editing photo caption instead of replacing message for chat ${chatId}`);
+        // Try to edit as photo caption instead of replacing the entire message
+        try {
+          const translatedText = await this.translateForUser(templateKeyOrText, chatId, replacements);
+          return await bot.editMessageCaption(translatedText, {
+            chat_id: chatId,
+            message_id: messageId,
+            parse_mode: 'Markdown',
+            reply_markup: botOptions.reply_markup
+          });
+        } catch (captionError) {
+          if (captionError.message && captionError.message.includes('message is not modified')) {
+            logger.debug('TRANSLATOR', `Photo caption unchanged for chat ${chatId}`);
+            return { message_id: messageId }; // Return existing message ID
+          }
+          logger.warn('TRANSLATOR', 'Caption edit failed, sending new message', captionError);
+          // If caption editing fails, send new message as last resort
+          return await this.sendTranslatedMessage(bot, chatId, templateKeyOrText, options);
+        }
       } else {
         logger.error('TRANSLATOR', 'Failed to edit message', error);
         // For other errors, still try to send new message as fallback

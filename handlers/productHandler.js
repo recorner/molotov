@@ -1,4 +1,4 @@
-// handlers/productHandler.js - Enhanced with multi-language support
+// handlers/productHandler.js - Enhanced with multi-language support and smart editing
 import db from '../database.js';
 import translationService from '../utils/translationService.js';
 import messageTranslator from '../utils/messageTranslator.js';
@@ -93,15 +93,20 @@ export async function showProductsInCategory(bot, chatId, categoryId, page = 1, 
 
 async function sendOrEdit(bot, chatId, messageId, text, keyboard) {
   if (messageId) {
-    // Use safe editing for existing messages
-    await safeEditMessage(bot, chatId, messageId, text, {
+    // Use smart editing - preserves photo banner when possible
+    await smartMessageManager.sendOrEditSmart(bot, chatId, messageId, text, {
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: keyboard }
-    });
+    }, true); // Force banner for product listings
   } else {
-    // Always send new product listings with banner for better UX
-    await messageTranslator.sendBannerWithMessage(bot, chatId, text, {
+    // Send new message with smart management
+    const result = await smartMessageManager.sendOrEditSmart(bot, chatId, null, text, {
       reply_markup: { inline_keyboard: keyboard }
-    });
+    }, true);
+    
+    // Track that this message has a photo banner
+    if (result && result.message_id) {
+      smartMessageManager.markAsPhotoMessage(chatId, result.message_id);
+    }
   }
 }

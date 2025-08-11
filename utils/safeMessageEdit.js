@@ -1,4 +1,4 @@
-// utils/safeMessageEdit.js - Utility to safely edit messages
+// utils/safeMessageEdit.js - Utility to safely edit messages with improved photo handling
 export async function safeEditMessage(bot, chatId, messageId, text, options = {}) {
   try {
     await bot.editMessageText(text, {
@@ -12,11 +12,70 @@ export async function safeEditMessage(bot, chatId, messageId, text, options = {}
       // Ignore "message not modified" errors - this is not a real error
       return;
     } else if (error.message && error.message.includes('there is no text in the message to edit')) {
-      // Cannot edit photo message to text - DELETE old message and send new one
-      console.log('[Safe Edit] Replacing photo with text message');
-      await replaceMessage(bot, chatId, messageId, 'text', text, options);
+      // This is a photo message - try to edit caption instead of deleting
+      console.log('[Safe Edit] Attempting to edit photo caption instead of replacing message');
+      try {
+        await bot.editMessageCaption(text, {
+          chat_id: chatId,
+          message_id: messageId,
+          parse_mode: options.parse_mode || 'Markdown',
+          reply_markup: options.reply_markup
+        });
+        console.log('[Safe Edit] Successfully edited photo caption');
+        return;
+      } catch (captionError) {
+        if (captionError.message && captionError.message.includes('message is not modified')) {
+          console.log('[Safe Edit] Photo caption unchanged');
+          return;
+        }
+        // If caption editing fails, fall back to replace
+        console.log('[Safe Edit] Caption edit failed, replacing message');
+        await replaceMessage(bot, chatId, messageId, 'text', text, options);
+      }
     } else {
       console.error('[Safe Edit Error]', error.message);
+    }
+  }
+}
+
+/**
+ * Safely edit a photo message caption without replacing the entire message
+ * @param {Object} bot - Telegram bot instance
+ * @param {number} chatId - Chat ID
+ * @param {number} messageId - Message ID
+ * @param {string} caption - New caption text
+ * @param {Object} options - Message options
+ */
+export async function safeEditPhotoCaption(bot, chatId, messageId, caption, options = {}) {
+  try {
+    await bot.editMessageCaption(caption, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: options.parse_mode || 'Markdown',
+      reply_markup: options.reply_markup
+    });
+    console.log('[Safe Photo Edit] Successfully edited photo caption');
+  } catch (error) {
+    if (error.message && error.message.includes('message is not modified')) {
+      // Caption is the same, try to update only reply markup if provided
+      if (options.reply_markup) {
+        try {
+          await bot.editMessageReplyMarkup(options.reply_markup, {
+            chat_id: chatId,
+            message_id: messageId
+          });
+          console.log('[Safe Photo Edit] Updated reply markup only');
+        } catch (markupError) {
+          console.log('[Safe Photo Edit] Reply markup unchanged');
+        }
+      }
+    } else if (error.message && error.message.includes('there is no text in the message to edit')) {
+      // This is not a photo message, fall back to text edit
+      console.log('[Safe Photo Edit] Not a photo message, using text edit');
+      await safeEditMessage(bot, chatId, messageId, caption, options);
+    } else {
+      console.error('[Safe Photo Edit Error]', error.message);
+      throw error;
     }
   }
 }

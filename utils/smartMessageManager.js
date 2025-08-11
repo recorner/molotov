@@ -32,17 +32,25 @@ class SmartMessageManager {
       
       // If editing existing message
       if (messageId) {
-        // Try safe editing first (handles photo->text conflicts automatically)
-        await safeEditMessage(bot, chatId, messageId, text, options);
+        // Check if the existing message has a photo banner
+        const hasPhotoBanner = lastMessage && lastMessage.type === 'photo' && lastMessage.messageId === messageId;
         
-        // Update tracking
-        this.lastMessageTypes.set(chatId, {
-          type: 'text',
-          messageId: messageId,
-          timestamp: Date.now()
-        });
-        
-        return;
+        if (hasPhotoBanner && (shouldUseBanner || forceBanner)) {
+          // Edit photo caption and buttons - much faster than replace
+          return await this.editPhotoCaption(bot, chatId, messageId, text, options);
+        } else {
+          // Try safe editing for text messages
+          await safeEditMessage(bot, chatId, messageId, text, options);
+          
+          // Update tracking
+          this.lastMessageTypes.set(chatId, {
+            type: 'text',
+            messageId: messageId,
+            timestamp: Date.now()
+          });
+          
+          return;
+        }
       }
       
       // For new messages, decide smart usage
@@ -77,6 +85,47 @@ class SmartMessageManager {
     } catch (error) {
       logger.error('SMART_MESSAGE', `Failed to send/edit message for chat ${chatId}`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Edit photo message caption and reply markup efficiently
+   * This is much faster than deleting and replacing the entire message
+   */
+  async editPhotoCaption(bot, chatId, messageId, text, options = {}) {
+    try {
+      // First try to edit the caption
+      await bot.editMessageCaption(text, {
+        chat_id: chatId,
+        message_id: messageId,
+        parse_mode: options.parse_mode || 'Markdown',
+        reply_markup: options.reply_markup
+      });
+      
+      logger.debug('SMART_EDIT', `Successfully edited photo caption for message ${messageId}`);
+      return { message_id: messageId };
+      
+    } catch (error) {
+      if (error.message && error.message.includes('message is not modified')) {
+        // Content is the same, try to update only reply markup if provided
+        if (options.reply_markup) {
+          try {
+            await bot.editMessageReplyMarkup(options.reply_markup, {
+              chat_id: chatId,
+              message_id: messageId
+            });
+            logger.debug('SMART_EDIT', `Updated reply markup for message ${messageId}`);
+          } catch (markupError) {
+            logger.debug('SMART_EDIT', `Reply markup unchanged for message ${messageId}`);
+          }
+        }
+        return { message_id: messageId };
+      } else {
+        logger.warn('SMART_EDIT', `Failed to edit photo caption for message ${messageId}, fallback to safe edit`, error);
+        // Fallback to safe edit (which might replace the message)
+        await safeEditMessage(bot, chatId, messageId, text, options);
+        return { message_id: messageId };
+      }
     }
   }
 
@@ -172,6 +221,43 @@ class SmartMessageManager {
         this.bannerUsage.set(chatId, recentUsage);
       }
     }
+  }
+
+  /**
+   * Mark a message as having a photo banner (for external tracking)
+   */
+  markAsPhotoMessage(chatId, messageId) {
+    this.lastMessageTypes.set(chatId, {
+      type: 'photo',
+      messageId: messageId,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Mark a message as text-only (for external tracking)
+   */
+  markAsTextMessage(chatId, messageId) {
+    this.lastMessageTypes.set(chatId, {
+      type: 'text',
+      messageId: messageId,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Smart edit for photo messages specifically - preserves the image
+   */
+  async smartEditPhoto(bot, chatId, messageId, text, options = {}) {
+    return await this.editPhotoCaption(bot, chatId, messageId, text, options);
+  }
+
+  /**
+   * Check if a message is likely to have a photo banner
+   */
+  hasPhotoBanner(chatId, messageId) {
+    const lastMessage = this.lastMessageTypes.get(chatId);
+    return lastMessage && lastMessage.type === 'photo' && lastMessage.messageId === messageId;
   }
 }
 

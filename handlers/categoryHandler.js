@@ -4,6 +4,7 @@ import translationService from '../utils/translationService.js';
 import messageTranslator from '../utils/messageTranslator.js';
 import instantTranslationService from '../utils/instantTranslationService.js';
 import { safeEditMessage } from '../utils/safeMessageEdit.js';
+import smartMessageManager from '../utils/smartMessageManager.js';
 
 export async function handleCategoryNavigation(bot, query) {
   const { data, message } = query;
@@ -51,12 +52,11 @@ export async function handleCategoryNavigation(bot, query) {
       const parentName = parent ? await instantTranslationService.getTranslation(parent.name, query.from.id) : 'Category';
       const headerText = await messageTranslator.translateTemplateForUser('select_category', query.from.id);
 
-      // Use safe editing that automatically handles photo-to-text conflicts
-      // It will send a new message if editing fails
-      await safeEditMessage(bot, message.chat.id, message.message_id, headerText, {
+      // Use smart editing that preserves photo banners when possible
+      await smartMessageManager.sendOrEditSmart(bot, message.chat.id, message.message_id, headerText, {
         parse_mode: 'Markdown',
         reply_markup: { inline_keyboard: buttons }
-      });
+      }, true); // Force banner for category navigation
     });
   });
 }

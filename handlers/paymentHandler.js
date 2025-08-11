@@ -67,12 +67,11 @@ export async function handleBuyCallback(bot, query) {
       [{ text: `🔙 ${backToProductsText}`, callback_data: 'load_categories' }]
     ];
 
-    // Show order summary with banner - use replace to handle photo/text conflicts
-    await replaceMessage(bot, query.message.chat.id, query.message.message_id, 'photo', './assets/image.png', {
-      caption: text,
+    // Show order summary with banner - use smart editing for better UX
+    await smartMessageManager.sendOrEditSmart(bot, query.message.chat.id, query.message.message_id, text, {
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: buttons }
-    });
+    }, true); // Force banner for payment flow
 
   } catch (error) {
     logger.error('PAYMENT', `Buy callback error for user ${from.id}, product ${productId}`, error);
@@ -204,12 +203,11 @@ export async function handlePaymentSelection(bot, query) {
       ]
     ];
 
-    // Show payment instructions with banner for professional payment experience
-    await replaceMessage(bot, query.message.chat.id, query.message.message_id, 'photo', './assets/image.png', {
-      caption: msg,
+    // Show payment instructions with banner for professional payment experience - use smart editing
+    await smartMessageManager.sendOrEditSmart(bot, query.message.chat.id, query.message.message_id, msg, {
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: paymentButtons }
-    });
+    }, true); // Force banner for payment instructions
 
   } catch (error) {
     console.error('[Payment Selection Error]', error);
@@ -545,12 +543,11 @@ export async function handlePaymentGuide(bot, query) {
     ]
   ];
 
-  // Show payment guide with banner for professional experience  
-  await replaceMessage(bot, query.message.chat.id, query.message.message_id, 'photo', './assets/image.png', {
-    caption: text,
+  // Show payment guide with banner for professional experience - use smart editing
+  await smartMessageManager.sendOrEditSmart(bot, query.message.chat.id, query.message.message_id, text, {
     parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: keyboard }
-  });
+  }, true); // Force banner for payment guide
 }
 
 export async function handlePaymentHelp(bot, query) {
