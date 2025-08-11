@@ -29,8 +29,8 @@ export async function handlePokeCommand(bot, msg) {
         `📌 **Poke Command Setup**\n\n` +
         `Please provide the usernames to poke (separated by commas):\n\n` +
         `📝 **Format Examples:**\n` +
-        `• Single user: @nova_chok\n` +
-        `• Multiple users: @nova_chok, @username2, @username3\n\n` +
+        `• Single user: @mizzcanny\n` +
+        `• Multiple users: @mizzcanny, @username2, @username3\n\n` +
         `❌ Type /cancel to cancel this operation.`,
         { parse_mode: 'Markdown' }
       );

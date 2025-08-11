@@ -355,7 +355,7 @@ bot.onText(/\/help/, async (msg) => {
   const { SUPPORT_USERNAME } = await import('./config.js');
   
   await bot.sendMessage(msg.chat.id, 
-    `${helpText}\n\n📞 ${supportText}: @${SUPPORT_USERNAME || 'nova_chok'}`,
+    `${helpText}\n\n📞 ${supportText}: @${SUPPORT_USERNAME || 'mizzcanny'}`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
@@ -366,7 +366,7 @@ bot.onText(/\/help/, async (msg) => {
           }],
           [{ 
             text: await messageTranslator.translateTemplateForUser('contact_admin', userId), 
-            url: `https://t.me/${SUPPORT_USERNAME || 'nova_chok'}` 
+            url: `https://t.me/${SUPPORT_USERNAME || 'mizzcanny'}` 
           }]
         ]
       }
@@ -581,7 +581,7 @@ bot.on('callback_query', async (query) => {
     if (data === 'contact_support' || data === 'support') {
       const { SUPPORT_USERNAME } = await import('./config.js');
       return bot.answerCallbackQuery(query.id, { 
-        text: `💬 Contact support: @${SUPPORT_USERNAME || 'nova_chok'}`,
+        text: `💬 Contact support: @${SUPPORT_USERNAME || 'mizzcanny'}`,
         show_alert: false 
       });
     }

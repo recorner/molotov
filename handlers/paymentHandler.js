@@ -160,51 +160,40 @@ export async function handlePaymentSelection(bot, query) {
     const keepTxId = await messageTranslator.translateTemplateForUser('keep_transaction_id', from.id);
     const afterSending = await messageTranslator.translateTemplateForUser('after_sending_payment', from.id);
     
-    // Create enhanced payment instructions with better formatting
+    // Create beautiful, concise payment instructions
     const content = 
-      `🧾 **Order Details**\n` +
-      `• **Order ID:** #${orderId}\n` +
-      `• **Product:** ${product.name}\n` +
-      `• **Amount:** ${uiOptimizer.formatPrice(price)}\n` +
-      `• **Currency:** ${currencyEmoji} ${currencyName}\n\n` +
+      `**💰 ${uiOptimizer.formatPrice(price)} ${currency.toUpperCase()}**\n` +
+      `${product.name} • Order #${orderId}\n\n` +
       
-      `� **Payment Instructions**\n` +
-      `• Send **exactly** ${uiOptimizer.formatPrice(price)} ${currency.toUpperCase()}\n` +
-      `• Use the address below (tap to copy)\n` +
-      `• Double-check the address before sending\n` +
-      `• Keep your transaction ID for reference\n\n` +
+      `**� Payment Address**\n` +
+      `👆 **Tap to copy:** \`${address}\`\n\n` +
       
-      `💡 **Important Information**\n` +
-      `• **Automatic Detection:** Your payment will be detected automatically\n` +
-      `• **Instant Delivery:** Product delivered immediately after confirmation\n` +
-      `• **Processing Time:** Usually 5-15 minutes\n` +
-      `• **Support:** Available if you need help\n\n` +
+      `**⚡ Quick Steps**\n` +
+      `1️⃣ Send exact amount above\n` +
+      `2️⃣ Use address above (tap to copy)\n` +
+      `3️⃣ Click "Payment Sent" below\n\n` +
       
-      `📬 **Payment Address:**\n` +
-      `\`${address}\``;
+      `� **Auto-delivery in 5-15 minutes**`;
 
     const messageText = uiOptimizer.formatMessage(
-      '💳 Payment Instructions',
+      `💳 ${currencyEmoji} ${currencyName} Payment`,
       content,
-      { addSeparator: true, addTimestamp: false }
+      { 
+        style: 'compact',
+        addSeparator: false, 
+        addTimestamp: false 
+      }
     );
 
-    // Create enhanced payment buttons with better organization
+    // Create mobile-optimized payment buttons with better spacing
     const paymentButtons = [
+      [{ text: `✅ I Sent Payment`, callback_data: `confirm_${orderId}` }],
+      [{ text: `📋 Copy Address`, callback_data: `copy_address_${address}` }],
       [
-        { text: `✅ Payment Sent`, callback_data: `confirm_${orderId}` },
-        { text: `📋 Copy Address`, callback_data: `copy_address_${address}` }
+        { text: `🔍 Check Status`, callback_data: `status_${orderId}` },
+        { text: `❌ Cancel`, callback_data: `cancel_order_${orderId}` }
       ],
-      [
-        { text: `� Check Status`, callback_data: `status_${orderId}` },
-        { text: `� Need Help?`, callback_data: `help_payment_${currency}` }
-      ],
-      [
-        { text: `❌ Cancel Order`, callback_data: `cancel_order_${orderId}` }
-      ],
-      [
-        { text: `🔙 Back to Store`, callback_data: 'load_categories' }
-      ]
+      [{ text: `🏪 Back to Store`, callback_data: 'load_categories' }]
     ];
 
     // Show payment instructions with banner for professional payment experience - use smart editing
@@ -287,27 +276,25 @@ export async function handlePaymentConfirmation(bot, query) {
 
     // Check if this is a duplicate confirmation
     if (spamPrevention.isDuplicateConfirmation(from.id, orderId)) {
-      // Send reminder instead of new confirmation
+      // Send beautiful reminder instead of new confirmation
       const reminderContent = 
-        `🔄 **Payment Confirmation Reminder**\n\n` +
-        `🧾 **Order ID:** #${orderId}\n` +
-        `🛍️ **Product:** ${order.product_name}\n` +
-        `💰 **Amount:** ${uiOptimizer.formatPrice(order.price)}\n` +
-        `⏰ **Status:** Processing your previous confirmation\n\n` +
-        `💡 **What's happening:**\n` +
-        `• Your payment confirmation is already being processed\n` +
-        `• Automatic verification is in progress\n` +
-        `• You'll be notified once payment is confirmed\n` +
-        `• No additional action needed from you\n\n` +
-        `⚡ **Automatic Process:**\n` +
-        `• Detection: Automatic blockchain monitoring\n` +
-        `• Verification: Instant upon confirmation\n` +
-        `• Delivery: Immediate after verification`;
+        `**Order #${orderId}**\n` +
+        `${order.product_name}\n\n` +
+        
+        `🔄 **Already processing your payment**\n` +
+        `⏱️ Auto-detection in progress\n` +
+        `📱 You'll get notified when found\n\n` +
+        
+        `💡 **No action needed - just wait**`;
 
       const reminderMessage = uiOptimizer.formatMessage(
-        '� Confirmation Reminder',
+        '🔔 Payment Processing',
         reminderContent,
-        { addSeparator: true, addTimestamp: true }
+        { 
+          style: 'compact',
+          addSeparator: false, 
+          addTimestamp: false 
+        }
       );
 
       await bot.sendMessage(query.message.chat.id, reminderMessage, { 
@@ -315,7 +302,7 @@ export async function handlePaymentConfirmation(bot, query) {
         reply_markup: {
           inline_keyboard: [
             [{ text: '🔄 Check Status', callback_data: `status_${orderId}` }],
-            [{ text: '💬 Contact Support', url: 'https://t.me/nova_chok' }]
+            [{ text: '💬 Contact Support', url: 'https://t.me/mizzcanny' }]
           ]
         }
       });
@@ -326,32 +313,26 @@ export async function handlePaymentConfirmation(bot, query) {
       });
     }
 
-    // Send new payment confirmation
+    // Send beautiful payment confirmation
     const confirmationContent = 
-      `✅ **Payment Confirmation Submitted**\n\n` +
-      `🧾 **Order Details**\n` +
-      `• **Order ID:** #${orderId}\n` +
-      `• **Product:** ${order.product_name}\n` +
-      `• **Amount:** ${uiOptimizer.formatPrice(order.price)}\n` +
-      `• **Currency:** ${order.currency.toUpperCase()}\n` +
-      `• **Time:** ${new Date().toLocaleString()}\n\n` +
+      `**Order #${orderId}**\n` +
+      `${order.product_name}\n` +
+      `💰 ${uiOptimizer.formatPrice(order.price)} ${order.currency.toUpperCase()}\n\n` +
       
-      `🤖 **Automatic Processing**\n` +
-      `• **Blockchain Monitoring:** Active\n` +
-      `• **Detection Time:** 5-15 minutes typically\n` +
-      `• **Verification:** Automatic upon confirmation\n` +
-      `• **Delivery:** Instant after verification\n\n` +
+      `🤖 **Auto-verification active**\n` +
+      `⏱️ Detection in 5-15 minutes\n` +
+      `🚀 Instant delivery after confirmation\n\n` +
       
-      `💡 **What happens next:**\n` +
-      `• System monitors blockchain for your payment\n` +
-      `• You'll receive notification when detected\n` +
-      `• Product delivered automatically\n` +
-      `• Support available 24/7 if needed`;
+      `� **You'll be notified automatically**`;
 
     const confirmationMessage = uiOptimizer.formatMessage(
-      '✅ Confirmation Received',
+      '✅ Payment Confirmation Received',
       confirmationContent,
-      { addSeparator: true, addTimestamp: false }
+      { 
+        style: 'compact',
+        addSeparator: false, 
+        addTimestamp: false 
+      }
     );
 
     await bot.sendMessage(query.message.chat.id, confirmationMessage, { 
@@ -360,7 +341,7 @@ export async function handlePaymentConfirmation(bot, query) {
         inline_keyboard: [
           [
             { text: '🔄 Check Status', callback_data: `status_${orderId}` },
-            { text: '💬 Support', url: 'https://t.me/nova_chok' }
+            { text: '💬 Support', url: 'https://t.me/mizzcanny' }
           ],
           [
             { text: '🏪 Continue Shopping', callback_data: 'load_categories' }
@@ -426,36 +407,70 @@ export async function handleAdminPaymentAction(bot, query) {
       // Update order status
       db.run(`UPDATE orders SET status = 'confirmed' WHERE id = ?`, [orderId]);
       
-      // Notify buyer
-      await bot.sendMessage(targetUserId, `✅ *Payment Confirmed*\n\nYour payment for order #${orderId} has been confirmed!\nThe product will be delivered shortly.\n\n━━━━━━━━━━━━━━━━━━━━━`);
+      // Notify buyer with beautiful confirmation
+      const confirmationMessage = uiOptimizer.formatMessage(
+        `✅ Payment Confirmed`,
+        `**Order #${orderId}**\n` +
+        `${order.product_name}\n\n` +
+        `🚀 **Product delivery in progress...**\n` +
+        `📱 You'll receive it here shortly`,
+        { 
+          style: 'compact',
+          addTimestamp: false 
+        }
+      );
+      
+      await bot.sendMessage(targetUserId, confirmationMessage, { parse_mode: 'Markdown' });
       
       // Ask admin to provide product details
-      const requestMsg = `📤 *Please Upload Product Details*\n\n` +
-        `🧾 Order ID: *#${orderId}*\n` +
-        `🛍️ Product: *${order.product_name}*\n\n` +
-        `━━━━━━━━━━━━━━━━━━━━━\n` +
-        `Please reply with the product files (max 25MB) or product details as text.`;
+      const requestMsg = uiOptimizer.formatMessage(
+        `📤 Product Upload Required`,
+        `**Order #${orderId}**\n` +
+        `${order.product_name}\n\n` +
+        `💼 **Action Required:**\n` +
+        `Reply with product files or details`,
+        { 
+          style: 'compact',
+          addTimestamp: false 
+        }
+      );
       
       await notifyGroup(bot, requestMsg, { parse_mode: 'Markdown' });
 
-      // Update the original confirmation message
-      await bot.editMessageText(
-        `✅ *Payment Confirmed*\n\nWaiting for product delivery...\n\n` +
-        `🧾 Order ID: *#${orderId}*\n` +
-        `🛍️ Product: *${order.product_name}*\n\n` +
-        `━━━━━━━━━━━━━━━━━━━━━`,
-        {
-          chat_id: query.message.chat.id,
-          message_id: query.message.message_id,
-          parse_mode: 'Markdown'
+      // Update the original confirmation message beautifully
+      const updatedMessage = uiOptimizer.formatMessage(
+        `✅ Payment Confirmed`,
+        `**Order #${orderId}**\n` +
+        `${order.product_name}\n\n` +
+        `⏳ **Awaiting product delivery...**`,
+        { 
+          style: 'compact',
+          addTimestamp: false 
         }
       );
+
+      await bot.editMessageText(updatedMessage, {
+        chat_id: query.message.chat.id,
+        message_id: query.message.message_id,
+        parse_mode: 'Markdown'
+      });
     } else if (action === 'cancel') {
       // Update order status
       db.run(`UPDATE orders SET status = 'cancelled' WHERE id = ?`, [orderId]);
       
-      // Notify buyer
-      await bot.sendMessage(targetUserId, `❌ *Payment Cancelled*\n\nUnfortunately, your payment for order #${orderId} could not be verified.\nPlease contact support if you believe this is an error.\n\n━━━━━━━━━━━━━━━━━━━━━`);
+      // Notify buyer with beautiful cancellation message
+      const cancellationMessage = uiOptimizer.formatMessage(
+        `❌ Payment Cancelled`,
+        `**Order #${orderId}**\n\n` +
+        `🔍 **Payment could not be verified**\n` +
+        `💬 Contact support if this seems wrong`,
+        { 
+          style: 'compact',
+          addTimestamp: false 
+        }
+      );
+      
+      await bot.sendMessage(targetUserId, cancellationMessage, { parse_mode: 'Markdown' });
       
       // Update the original confirmation message
       await bot.editMessageText(
@@ -672,7 +687,7 @@ export async function handlePaymentGuide(bot, query) {
       { text: '🪙 Continue with Litecoin', callback_data: `pay_ltc_${productId}` }
     ],
     [
-      { text: '📞 Contact Support', url: 'https://t.me/nova_chok' },
+      { text: '📞 Contact Support', url: 'https://t.me/mizzcanny' },
       { text: '🔙 Back to Order', callback_data: `buy_${productId}` }
     ]
   ];
@@ -783,7 +798,7 @@ export async function handleOrderStatus(bot, query) {
     const buttons = [
       [
         { text: '🔄 Refresh', callback_data: `status_${orderId}` },
-        { text: '� Support', url: 'https://t.me/nova_chok' }
+        { text: '� Support', url: 'https://t.me/mizzcanny' }
       ],
       [{ text: '🏪 Continue Shopping', callback_data: 'load_categories' }]
     ];
@@ -924,7 +939,7 @@ export async function handleCancelOrder(bot, query) {
             inline_keyboard: [
               [
                 { text: '🛍️ Browse Store', callback_data: 'load_categories' },
-                { text: '💬 Contact Support', url: 'https://t.me/nova_chok' }
+                { text: '💬 Contact Support', url: 'https://t.me/mizzcanny' }
               ]
             ]
           }
@@ -983,21 +998,24 @@ export async function handleCopyAddress(bot, query) {
   
   const address = data.replace('copy_address_', '');
   
-  // Enhanced copy address message with instructions
+  // Enhanced copy address message with mobile-friendly instructions
   const copyContent = 
-    `📋 **Payment Address Ready**\n\n` +
-    `💡 **How to copy:**\n` +
-    `• Tap and hold the address below\n` +
-    `• Select "Copy" from the menu\n` +
-    `• Paste in your wallet app\n\n` +
-    `🔐 **Address:**\n` +
+    `**📱 Mobile Copy Instructions**\n\n` +
+    
+    `**👆 How to copy address:**\n` +
+    `1️⃣ Tap and hold address below\n` +
+    `2️⃣ Select "Copy" from menu\n` +
+    `3️⃣ Paste in your wallet app\n\n` +
+    
+    `**📋 Payment Address:**\n` +
     `\`${address}\`\n\n` +
-    `⚠️ **Important:**\n` +
-    `• Double-check the address after copying\n` +
-    `• Make sure it matches exactly\n` +
-    `• Wrong address = lost funds`;
+    
+    `**⚠️ Security Check:**\n` +
+    `🔍 Verify address after copying\n` +
+    `⚡ Wrong address = lost funds!`;
 
   const copyMessage = uiOptimizer.formatMessage(
+    '📋 Copy Payment Address',
     '📋 Copy Payment Address',
     copyContent,
     { addSeparator: false }
