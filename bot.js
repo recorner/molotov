@@ -582,6 +582,23 @@ bot.on('callback_query', async (query) => {
       });
     }
 
+    // Handle support/contact callbacks
+    if (data === 'contact_support' || data === 'support') {
+      const { SUPPORT_USERNAME } = await import('./config.js');
+      return bot.answerCallbackQuery(query.id, { 
+        text: `💬 Contact support: @${SUPPORT_USERNAME || 'nova_chok'}`,
+        show_alert: false 
+      });
+    }
+
+    // Handle ignore callbacks (for buttons that shouldn't do anything)
+    if (data === 'ignore') {
+      return bot.answerCallbackQuery(query.id, { 
+        text: '👍', 
+        show_alert: false 
+      });
+    }
+
     // Fallback for unknown callbacks - Add more specific error handling
     logger.warn('CALLBACK', `Unknown callback from user ${userId}: ${data}`);
     return await messageTranslator.answerTranslatedCallback(bot, query.id, 'unknown_action', userId);

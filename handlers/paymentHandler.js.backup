@@ -726,110 +726,48 @@ export async function handlePaymentHelp(bot, query) {
 }
 
 export async function handleOrderStatus(bot, query) {
-  const { data, from } = query;
+  const { data } = query;
   if (!data.startsWith('status_')) return;
 
   const orderId = data.split('_')[1];
 
-  // Check spam prevention
-  if (!spamPrevention.canPerformAction(from.id, 'status')) {
-    const remaining = spamPrevention.getTimeRemaining(from.id, 'status');
-    return bot.answerCallbackQuery(query.id, { 
-      text: `⏱️ Please wait ${remaining} seconds before checking again`,
-      show_alert: false 
-    });
-  }
-
   db.get(`SELECT o.*, p.name AS product_name FROM orders o 
           JOIN products p ON p.id = o.product_id 
-          WHERE o.id = ? AND o.user_id = ?`, [orderId, from.id], async (err, order) => {
+          WHERE o.id = ?`, [orderId], (err, order) => {
     if (err || !order) {
-      return bot.answerCallbackQuery(query.id, { 
-        text: '❌ Order not found or access denied',
-        show_alert: true 
-      });
+      return bot.answerCallbackQuery(query.id, { text: '❌ Order not found.' });
     }
 
     const statusEmoji = {
       'pending': '⏳',
       'confirmed': '✅',
       'delivered': '🎉',
-      'cancelled': '❌',
-      'processing': '🔄'
+      'cancelled': '❌'
     };
 
-    // Create enhanced status content
-    const statusContent = 
-      `🧾 **Order Details**\n` +
-      `• **Order ID:** #${order.id}\n` +
-      `• **Product:** ${order.product_name}\n` +
-      `• **Amount:** ${uiOptimizer.formatPrice(order.price)}\n` +
-      `• **Currency:** ${order.currency.toUpperCase()}\n` +
-      `• **Created:** ${new Date(order.created_at).toLocaleString()}\n\n` +
-      
-      `📊 **Current Status**\n` +
-      `${statusEmoji[order.status] || '❓'} **${order.status.toUpperCase()}**\n\n` +
-      
-      `${getStatusDescription(order.status)}\n\n` +
-      
-      `⏰ **Last Updated:** ${new Date().toLocaleString()}`;
-
-    const statusMessage = uiOptimizer.formatMessage(
-      '📋 Order Status',
-      statusContent,
-      { addSeparator: true, addTimestamp: false }
-    );
+    const statusMessage = `📋 **Order Status Check**\n\n` +
+      `🧾 **Order ID:** #${order.id}\n` +
+      `🛍️ **Product:** ${order.product_name}\n` +
+      `💰 **Amount:** $${order.price} ${order.currency}\n` +
+      `📅 **Created:** ${new Date(order.created_at).toLocaleString()}\n` +
+      `${statusEmoji[order.status] || '❓'} **Status:** ${order.status.toUpperCase()}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `${getStatusDescription(order.status)}`;
 
     const buttons = [
       [
-        { text: '🔄 Refresh', callback_data: `status_${orderId}` },
-        { text: '� Support', url: 'https://t.me/nova_chok' }
+        { text: '🔄 Refresh Status', callback_data: `status_${orderId}` },
+        { text: '📞 Contact Support', callback_data: 'contact_support' }
       ],
-      [{ text: '🏪 Continue Shopping', callback_data: 'load_categories' }]
+      [{ text: '🔙 Back to Store', callback_data: 'load_categories' }]
     ];
 
-    // Use smart message manager to handle both text and photo messages
-    try {
-      await smartMessageManager.sendOrEditSmart(
-        bot, 
-        query.message.chat.id, 
-        query.message.message_id, 
-        statusMessage, 
-        {
-          parse_mode: 'Markdown',
-          reply_markup: { inline_keyboard: buttons }
-        }, 
-        false // Don't force banner for status checks - keep it text for clarity
-      );
-
-      // Provide user feedback
-      bot.answerCallbackQuery(query.id, { 
-        text: `� Status updated: ${order.status.toUpperCase()}`,
-        show_alert: false 
-      });
-
-    } catch (editError) {
-      logger.error('ORDER_STATUS', `Failed to update status message for order ${orderId}`, editError);
-      
-      // Fallback: send new status message
-      try {
-        await bot.sendMessage(query.message.chat.id, statusMessage, {
-          parse_mode: 'Markdown',
-          reply_markup: { inline_keyboard: buttons }
-        });
-        
-        bot.answerCallbackQuery(query.id, { 
-          text: '📊 Status checked - new message sent',
-          show_alert: false 
-        });
-      } catch (sendError) {
-        logger.error('ORDER_STATUS', `Failed to send status message for order ${orderId}`, sendError);
-        bot.answerCallbackQuery(query.id, { 
-          text: '❌ Failed to check status. Please try again.',
-          show_alert: true 
-        });
-      }
-    }
+    bot.editMessageText(statusMessage, {
+      chat_id: query.message.chat.id,
+      message_id: query.message.message_id,
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: buttons }
+    });
   });
 }
 
@@ -875,7 +813,7 @@ export async function handleCancelOrder(bot, query) {
     }
 
     // Update order status to cancelled
-    db.run(`UPDATE orders SET status = 'cancelled' WHERE id = ?`, [orderId], async (updateErr) => {
+    db.run(`UPDATE orders SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?`, [orderId], async (updateErr) => {
       if (updateErr) {
         logger.error('CANCEL_ORDER', `Failed to cancel order ${orderId}`, updateErr);
         return bot.answerCallbackQuery(query.id, { 
@@ -963,6 +901,31 @@ export async function handleCancelOrder(bot, query) {
           logger.error('CANCEL_ORDER', 'Failed to redirect to categories', redirectError);
         }
       }, 2000);
+    });
+  });
+}
+
+      const buttons = [
+        [
+          { text: '🛍️ Continue Shopping', callback_data: 'load_categories' },
+          { text: '📞 Contact Support', url: 'https://t.me/nova_chok' }
+        ]
+      ];
+
+      bot.editMessageText(cancelMessage, {
+        chat_id: query.message.chat.id,
+        message_id: query.message.message_id,
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: buttons }
+      });
+
+      // Notify admin
+      const adminMsg = `❌ **Order Cancelled by Customer**\n\n` +
+        `🧾 **Order ID:** #${orderId}\n` +
+        `👤 **Customer:** [${from.first_name}](tg://user?id=${from.id})\n` +
+        `📅 **Cancelled:** ${new Date().toLocaleString()}`;
+
+      notifyGroup(bot, adminMsg, { parse_mode: 'Markdown' });
     });
   });
 }
