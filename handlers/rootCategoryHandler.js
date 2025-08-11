@@ -1,10 +1,11 @@
-// handlers/rootCategoryHandler.js - Enhanced with multi-language support and smart message editing
+// handlers/rootCategoryHandler.js - Enhanced with multi-language support and UI optimization
 import db from '../database.js';
 import translationService from '../utils/translationService.js';
 import messageTranslator from '../utils/messageTranslator.js';
 import instantTranslationService from '../utils/instantTranslationService.js';
 import { safeEditMessage } from '../utils/safeMessageEdit.js';
 import smartMessageManager from '../utils/smartMessageManager.js';
+import uiOptimizer from '../utils/uiOptimizer.js';
 
 export async function showRootCategories(bot, chatId, messageId = null) {
   try {
@@ -18,33 +19,38 @@ export async function showRootCategories(bot, chatId, messageId = null) {
         return messageTranslator.sendTranslatedMessage(bot, chatId, 'no_categories');
       }
 
-      const buttons = [];
-      
-      // Translate category names
+      // Prepare category data for UI optimizer
+      const categories = [];
       for (const cat of rows) {
         const translatedName = await instantTranslationService.getTranslation(cat.name, chatId);
-        buttons.push([{
-          text: `📂 ${translatedName}`,
-          callback_data: `cat_${cat.id}`
-        }]);
+        categories.push({
+          id: cat.id,
+          name: translatedName
+        });
       }
 
-      // Add translated navigation buttons
-      buttons.push([
+      // Prepare additional buttons with translations
+      const additionalButtons = [
         { 
-          text: await messageTranslator.translateTemplateForUser('contact_admin', chatId), 
+          text: `📞 ${await messageTranslator.translateTemplateForUser('contact_admin', chatId)}`, 
           url: 'https://t.me/nova_chok' 
-        }
-      ]);
-      
-      buttons.push([
+        },
         { 
-          text: await messageTranslator.translateTemplateForUser('change_language', chatId), 
+          text: `🌍 ${await messageTranslator.translateTemplateForUser('change_language', chatId)}`, 
           callback_data: 'change_language' 
         }
-      ]);
+      ];
 
-      const messageText = await messageTranslator.translateTemplateForUser('main_categories', chatId);
+      // Create optimized button layout
+      const buttons = uiOptimizer.createCategoryButtons(categories, additionalButtons);
+
+      // Create optimized message text
+      const rawMessage = await messageTranslator.translateTemplateForUser('main_categories', chatId);
+      const messageText = uiOptimizer.formatMessage(
+        '🏪 Welcome to Our Store',
+        rawMessage,
+        { addSeparator: false }
+      );
 
       // Use smart message manager for better UX
       if (messageId) {
@@ -66,6 +72,7 @@ export async function showRootCategories(bot, chatId, messageId = null) {
     });
   } catch (error) {
     console.error('[Root Categories Error]', error);
-    bot.sendMessage(chatId, '❌ Error loading categories.');
+    const errorMsg = uiOptimizer.createStatusMessage('error', 'Error loading categories');
+    bot.sendMessage(chatId, errorMsg);
   }
 }

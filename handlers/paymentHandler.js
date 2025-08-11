@@ -10,6 +10,7 @@ import deliveryTracker from '../utils/deliveryTracker.js';
 import logger from '../utils/logger.js';
 import { safeEditMessage, replaceMessage } from '../utils/safeMessageEdit.js';
 import smartMessageManager from '../utils/smartMessageManager.js';
+import uiOptimizer from '../utils/uiOptimizer.js';
 
 export async function handleBuyCallback(bot, query) {
   const { data, from } = query;
@@ -40,35 +41,28 @@ export async function handleBuyCallback(bot, query) {
     const paymentOptionsTitle = await messageTranslator.translateTemplateForUser('payment_options', from.id);
     const choosePaymentMethod = await messageTranslator.translateTemplateForUser('choose_payment_method', from.id);
     
-    const noDescription = await messageTranslator.translateTemplateForUser('no_description', from.id);    const text = `🛍️ **${orderSummaryTitle}**\n\n` +
+    const noDescription = await messageTranslator.translateTemplateForUser('no_description', from.id);
+    
+    // Create optimized message content
+    const content = 
       `🛒 **${productLabel}:** ${product.name}\n` +
-      `💰 **${priceLabel}:** $${product.price}\n` +
+      `💰 **${priceLabel}:** ${uiOptimizer.formatPrice(product.price)}\n` +
       `📝 **${descriptionLabel}:** ${product.description || noDescription}\n` +
       `⏰ **${dateLabel}:** ${new Date().toLocaleString()}\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━\n` +
       `🔐 **${paymentOptionsTitle}**\n` +
       `${choosePaymentMethod}`;
 
-    const bitcoinText = await messageTranslator.translateTemplateForUser('bitcoin_payment', from.id);
-    const litecoinText = await messageTranslator.translateTemplateForUser('litecoin_payment', from.id);
-    const paymentGuideText = await messageTranslator.translateTemplateForUser('payment_guide', from.id);
-    const cancelOrderText = await messageTranslator.translateTemplateForUser('cancel_order', from.id);
-    const backToProductsText = await messageTranslator.translateTemplateForUser('back_to_products', from.id);
+    const messageText = uiOptimizer.formatMessage(
+      '💳 Order Summary',
+      content,
+      { addSeparator: true }
+    );
 
-    const buttons = [
-      [
-        { text: `₿ ${bitcoinText}`, callback_data: `pay_btc_${product.id}` },
-        { text: `🪙 ${litecoinText}`, callback_data: `pay_ltc_${product.id}` }
-      ],
-      [
-        { text: `💡 ${paymentGuideText}`, callback_data: `guide_${product.id}` },
-        { text: `❌ ${cancelOrderText}`, callback_data: `cancel_order_${product.id}` }
-      ],
-      [{ text: `🔙 ${backToProductsText}`, callback_data: 'load_categories' }]
-    ];
+    // Create optimized payment buttons
+    const buttons = uiOptimizer.createPaymentButtons(product.id, 'select');
 
     // Show order summary with banner - use smart editing for better UX
-    await smartMessageManager.sendOrEditSmart(bot, query.message.chat.id, query.message.message_id, text, {
+    await smartMessageManager.sendOrEditSmart(bot, query.message.chat.id, query.message.message_id, messageText, {
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: buttons }
     }, true); // Force banner for payment flow

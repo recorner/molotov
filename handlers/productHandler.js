@@ -1,10 +1,11 @@
-// handlers/productHandler.js - Enhanced with multi-language support and smart editing
+// handlers/productHandler.js - Enhanced with multi-language support and UI optimization
 import db from '../database.js';
 import translationService from '../utils/translationService.js';
 import messageTranslator from '../utils/messageTranslator.js';
 import instantTranslationService from '../utils/instantTranslationService.js';
 import { safeEditMessage } from '../utils/safeMessageEdit.js';
 import smartMessageManager from '../utils/smartMessageManager.js';
+import uiOptimizer from '../utils/uiOptimizer.js';
 
 export async function showProductsInCategory(bot, chatId, categoryId, page = 1, messageId = null) {
   // Ensure categoryId and page are valid
@@ -45,47 +46,63 @@ export async function showProductsInCategory(bot, chatId, categoryId, page = 1, 
 
         if (!products || products.length === 0) {
           const noProductsPageMsg = await messageTranslator.translateTemplateForUser('no_products_page', chatId);
-          return sendOrEdit(bot, chatId, messageId, `📭 *${noProductsPageMsg}*`, []);
+          const errorMsg = uiOptimizer.createStatusMessage('info', 'No products available', {
+            details: noProductsPageMsg
+          });
+          return sendOrEdit(bot, chatId, messageId, errorMsg, []);
         }
 
-        const headerText = await messageTranslator.translateTemplateForUser('products_in_category', chatId);
-        let text = `🛒 *${headerText}:*\n\n`;
-        const keyboard = [];
-
+        // Prepare products for UI optimizer
+        const productsData = [];
         for (const product of products) {
-          // Translate product name and description using instant service
           const translatedName = await instantTranslationService.getTranslation(product.name, chatId);
           const translatedDesc = product.description ? 
             await instantTranslationService.getTranslation(product.description, chatId) : 
             await messageTranslator.translateTemplateForUser('no_description', chatId);
 
-          text += `• *${translatedName}*\n`;
-          text += `💬 _${translatedDesc}_\n`;
-          text += `💰 *${messageTranslator.formatPrice(product.price)}*\n\n`;
-
-          const buyText = await messageTranslator.translateTemplateForUser('buy_product', chatId);
-          keyboard.push([{
-            text: `${buyText} ${translatedName}`,
-            callback_data: `buy_${product.id}`
-          }]);
+          productsData.push({
+            id: product.id,
+            name: translatedName,
+            description: translatedDesc,
+            price: uiOptimizer.formatPrice(product.price)
+          });
         }
 
-        const navRow = [];
-        if (page > 1) {
-          const prevText = await messageTranslator.translateTemplateForUser('previous_page', chatId);
-          navRow.push({ text: `${prevText}`, callback_data: `page_${categoryId}_${page - 1}` });
-        }
-        if (page < totalPages) {
-          const nextText = await messageTranslator.translateTemplateForUser('next_page', chatId);
-          navRow.push({ text: `${nextText}`, callback_data: `page_${categoryId}_${page + 1}` });
-        }
-
-        keyboard.push(navRow);
+        // Create optimized message content
+        const headerText = await messageTranslator.translateTemplateForUser('products_in_category', chatId);
+        let content = '';
         
-        const backText = await messageTranslator.translateTemplateForUser('back_to_categories', chatId);
-        keyboard.push([{ text: `${backText}`, callback_data: 'back_to_categories' }]);
+        productsData.forEach((product, index) => {
+          content += `**${index + 1}.** ${product.name}\n`;
+          content += `💭 _${product.description}_\n`;
+          content += `💰 **${product.price}**\n`;
+          if (index < productsData.length - 1) content += '\n';
+        });
 
-        sendOrEdit(bot, chatId, messageId, text, keyboard);
+        const text = uiOptimizer.formatMessage(
+          `🛒 ${headerText}`,
+          content,
+          { addSeparator: true }
+        );
+
+        // Create additional navigation buttons
+        const additionalButtons = [
+          {
+            text: '🔙 Back to Categories',
+            callback_data: 'load_categories'
+          }
+        ];
+
+        // Create optimized button layout using UI optimizer
+        const keyboard = uiOptimizer.createProductButtons(
+          productsData, 
+          page, 
+          totalPages, 
+          categoryId, 
+          additionalButtons
+        );
+
+        await sendOrEdit(bot, chatId, messageId, text, keyboard);
       }
     );
   });
