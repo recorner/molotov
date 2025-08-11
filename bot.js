@@ -528,17 +528,12 @@ bot.on('callback_query', async (query) => {
       return await handleAdminPaymentAction(bot, query);
     }
 
-    // Admin panel routing (more specific now)
+        // Admin system routing
     if (
       data.startsWith('panel_') ||
+      data.startsWith('admin_') ||
       data === 'cocktail_back' ||
-      data.startsWith('admin_analytics') ||
-      data.startsWith('admin_groups') ||
-      data.startsWith('admin_sync') ||
-      data.startsWith('admin_logs') ||
-      data.startsWith('admin_settings') ||
       data.startsWith('vouch_') ||
-      data.startsWith('wallet_') ||
       data.startsWith('export_')
     ) {
       return handleAdminCallback(bot, query);

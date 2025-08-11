@@ -186,22 +186,31 @@ class UIOptimizer {
       addSeparator = false,
       addTimestamp = false,
       addFooter = null,
-      maxLength = this.MAX_MESSAGE_LENGTH
+      maxLength = this.MAX_MESSAGE_LENGTH,
+      style = 'default'
     } = options;
     
     let message = '';
     
-    // Add title with formatting
+    // Add title with style-appropriate formatting
     if (title) {
-      message += `**${title}**\n\n`;
+      if (style === 'compact') {
+        message += `**${title}**\n\n`;
+      } else {
+        message += `**${title}**\n\n`;
+      }
     }
     
     // Add content
     message += content;
     
-    // Add separator
+    // Add separator (style-dependent)
     if (addSeparator) {
-      message += `\n\n${this.SECTION_SEPARATOR}`;
+      if (style === 'compact') {
+        message += `\n\n${'─'.repeat(20)}`;
+      } else {
+        message += `\n\n${this.SECTION_SEPARATOR}`;
+      }
     }
     
     // Add timestamp
@@ -378,6 +387,86 @@ class UIOptimizer {
     
     const symbol = symbols[currency] || currency;
     return `${symbol}${parseFloat(price).toFixed(2)}`;
+  }
+
+  /**
+   * Create mobile-optimized admin button layout
+   * @param {Array} sections - Array of section objects with text, callback_data, and priority
+   * @returns {Array} 2D array of inline keyboard buttons optimized for mobile
+   */
+  createMobileAdminLayout(sections) {
+    if (!sections || !Array.isArray(sections)) return [];
+
+    // Group by priority with mobile-first approach
+    const core = sections.filter(s => s.priority === 'core');
+    const secondary = sections.filter(s => s.priority === 'secondary');
+    const utility = sections.filter(s => s.priority === 'utility');
+
+    const buttons = [];
+
+    // Core functions: 2 per row (easy thumb access)
+    for (let i = 0; i < core.length; i += 2) {
+      const row = [core[i]];
+      if (core[i + 1]) row.push(core[i + 1]);
+      buttons.push(row);
+    }
+
+    // Secondary functions: 2 per row
+    for (let i = 0; i < secondary.length; i += 2) {
+      const row = [secondary[i]];
+      if (secondary[i + 1]) row.push(secondary[i + 1]);
+      buttons.push(row);
+    }
+
+    // Utility functions: 3 per row (compact)
+    for (let i = 0; i < utility.length; i += 3) {
+      const row = [utility[i]];
+      if (utility[i + 1]) row.push(utility[i + 1]);
+      if (utility[i + 2]) row.push(utility[i + 2]);
+      buttons.push(row);
+    }
+
+    return buttons;
+  }
+
+  /**
+   * Create admin-specific button layouts with priority organization
+   * @param {Array} sections - Array of section objects with text, callback_data, and priority
+   * @returns {Array} 2D array of inline keyboard buttons
+   */
+  createAdminButtons(sections) {
+    if (!sections || !Array.isArray(sections)) return [];
+
+    // Group by priority
+    const highPriority = sections.filter(s => s.priority === 'high');
+    const mediumPriority = sections.filter(s => s.priority === 'medium');
+    const lowPriority = sections.filter(s => s.priority === 'low');
+
+    const buttons = [];
+
+    // High priority: 2 per row for important functions
+    for (let i = 0; i < highPriority.length; i += 2) {
+      const row = [highPriority[i]];
+      if (highPriority[i + 1]) row.push(highPriority[i + 1]);
+      buttons.push(row);
+    }
+
+    // Medium priority: 2 per row for moderate functions
+    for (let i = 0; i < mediumPriority.length; i += 2) {
+      const row = [mediumPriority[i]];
+      if (mediumPriority[i + 1]) row.push(mediumPriority[i + 1]);
+      buttons.push(row);
+    }
+
+    // Low priority: 3 per row for utilities
+    for (let i = 0; i < lowPriority.length; i += 3) {
+      const row = [lowPriority[i]];
+      if (lowPriority[i + 1]) row.push(lowPriority[i + 1]);
+      if (lowPriority[i + 2]) row.push(lowPriority[i + 2]);
+      buttons.push(row);
+    }
+
+    return buttons;
   }
 
   /**
