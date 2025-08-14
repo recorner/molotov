@@ -693,10 +693,15 @@ bot.on('message', async (msg) => {
   }
 
   // Handle product delivery uploads (files, photos, and text)
-  if (msg.reply_to_message && msg.reply_to_message.text?.includes('Please Upload Product Details')) {
+  if (msg.reply_to_message && (
+    msg.reply_to_message.text?.includes('Product Upload Required') ||
+    msg.reply_to_message.text?.includes('Please Upload Product Details') ||
+    msg.reply_to_message.text?.includes('Reply with product files or details')
+  )) {
     logger.info('DELIVERY', `Product delivery detected from user ${userId}`);
     // Try multiple regex patterns to match different formats
-    const orderIdMatch = msg.reply_to_message.text.match(/Order ID: #(\d+)/) ||
+    const orderIdMatch = msg.reply_to_message.text.match(/Order #(\d+)/) ||
+      msg.reply_to_message.text.match(/Order ID: #(\d+)/) ||
       msg.reply_to_message.text.match(/Order ID: \*#(\d+)\*/) ||
       msg.reply_to_message.text.match(/#(\d+)/);
     

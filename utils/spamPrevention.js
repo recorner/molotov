@@ -36,17 +36,24 @@ class SpamPrevention {
 
   /**
    * Check if user can send payment confirmation
+   * This method should be called AFTER duplicate check
    */
   canSendConfirmation(userId, orderId) {
     const confirmKey = `${userId}_${orderId}`;
     const lastConfirmation = this.confirmationsSent.get(confirmKey);
     const now = Date.now();
     
+    // Reduce cooldown for payment confirmations to 15 seconds (was 30)
+    const PAYMENT_CONFIRMATION_COOLDOWN = 15000; 
+    
     // Check cooldown
-    if (lastConfirmation && now - lastConfirmation < this.CONFIRMATION_COOLDOWN) {
-      const remainingTime = Math.ceil((this.CONFIRMATION_COOLDOWN - (now - lastConfirmation)) / 1000);
+    if (lastConfirmation && now - lastConfirmation < PAYMENT_CONFIRMATION_COOLDOWN) {
+      const remainingTime = Math.ceil((PAYMENT_CONFIRMATION_COOLDOWN - (now - lastConfirmation)) / 1000);
       return { allowed: false, reason: 'cooldown', remainingTime };
     }
+    
+    // Increase max confirmations per order to 5 (was 3)
+    const MAX_CONFIRMATIONS = 5;
     
     // Check max confirmations (count confirmations in last hour)
     const oneHourAgo = now - 3600000;
@@ -58,13 +65,23 @@ class SpamPrevention {
       }
     }
     
-    if (confirmationCount >= this.MAX_CONFIRMATIONS_PER_ORDER) {
+    if (confirmationCount >= MAX_CONFIRMATIONS) {
       return { allowed: false, reason: 'max_reached', count: confirmationCount };
     }
     
-    // Record the confirmation
+    // Record the confirmation only if allowed
     this.confirmationsSent.set(confirmKey, now);
     return { allowed: true };
+  }
+
+  /**
+   * Record a successful confirmation (separate from the check)
+   * This should be called after successful processing
+   */
+  recordConfirmation(userId, orderId) {
+    const confirmKey = `${userId}_${orderId}`;
+    const now = Date.now();
+    this.confirmationsSent.set(confirmKey, now);
   }
 
   /**

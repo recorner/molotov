@@ -218,12 +218,21 @@ export async function handlePaymentSelection(bot, query) {
 export async function handlePaymentConfirmation(bot, query) {
   const { data, from } = query;
 
-  if (!data.startsWith('confirm_')) return;
+  console.log('[CONFIRM TRACK 1] handlePaymentConfirmation called');
+  console.log('[CONFIRM TRACK 2] Callback data:', data);
+  console.log('[CONFIRM TRACK 3] User ID:', from.id);
+
+  if (!data.startsWith('confirm_')) {
+    console.log('[CONFIRM TRACK 4] Not a confirm callback, returning');
+    return;
+  }
 
   const orderId = parseInt(data.split('_')[1]);
+  console.log('[CONFIRM TRACK 5] Extracted orderId:', orderId);
 
   // Check spam prevention first
   if (!spamPrevention.canPerformAction(from.id, 'confirm')) {
+    console.log('[CONFIRM TRACK 6] Spam prevention blocked');
     const remaining = spamPrevention.getTimeRemaining(from.id, 'confirm');
     return bot.answerCallbackQuery(query.id, { 
       text: `⏱️ Please wait ${remaining} seconds before trying again`,
@@ -231,34 +240,99 @@ export async function handlePaymentConfirmation(bot, query) {
     });
   }
 
-  // Check confirmation limits
-  const confirmCheck = spamPrevention.canSendConfirmation(from.id, orderId);
-  if (!confirmCheck.allowed) {
-    let alertText;
-    if (confirmCheck.reason === 'cooldown') {
-      alertText = `⏱️ You can send another confirmation in ${confirmCheck.remainingTime} seconds`;
-    } else if (confirmCheck.reason === 'max_reached') {
-      alertText = `🚫 Maximum confirmations reached for this order. Please wait for processing or contact support.`;
-    }
-    
+  console.log('[CONFIRM TRACK 7] Spam prevention passed');
+
+  // Check if this is a duplicate confirmation BEFORE recording it
+  if (spamPrevention.isDuplicateConfirmation(from.id, orderId)) {
+    console.log('[CONFIRM TRACK 8] Duplicate confirmation detected, sending reminder');
+    // Send beautiful reminder instead of new confirmation
+    const reminderContent = 
+      `**Order #${orderId}**\n` +
+      `⏱️ Auto-detection in progress\n` +
+      `📱 You'll get notified when found\n\n` +
+      `💡 **No action needed - just wait**`;
+
+    const reminderMessage = uiOptimizer.formatMessage(
+      '🔔 Payment Processing',
+      reminderContent,
+      { 
+        style: 'compact',
+        addSeparator: false, 
+        addTimestamp: false 
+      }
+    );
+
+    await bot.sendMessage(query.message.chat.id, reminderMessage, { 
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🔄 Check Status', callback_data: `status_${orderId}` }],
+          [{ text: '💬 Contact Support', url: 'https://t.me/mizzcanny' }]
+        ]
+      }
+    });
+
     return bot.answerCallbackQuery(query.id, { 
-      text: alertText,
+      text: '🔔 Confirmation reminder sent - payment still being processed',
+      show_alert: false 
+    });
+  }
+
+  // Check confirmation limits AFTER duplicate check (without recording)
+  const confirmKey = `${from.id}_${orderId}`;
+  const lastConfirmation = spamPrevention.confirmationsSent.get(confirmKey);
+  const now = Date.now();
+  const PAYMENT_CONFIRMATION_COOLDOWN = 15000; 
+  
+  if (lastConfirmation && now - lastConfirmation < PAYMENT_CONFIRMATION_COOLDOWN) {
+    const remainingTime = Math.ceil((PAYMENT_CONFIRMATION_COOLDOWN - (now - lastConfirmation)) / 1000);
+    console.log('[CONFIRM TRACK 9] Confirmation cooldown active:', remainingTime, 'seconds');
+    return bot.answerCallbackQuery(query.id, { 
+      text: `⏱️ You can send another confirmation in ${remainingTime} seconds`,
       show_alert: true 
     });
   }
+
+  // Check max confirmations
+  const oneHourAgo = now - 3600000;
+  let confirmationCount = 0;
+  for (const [key, timestamp] of spamPrevention.confirmationsSent.entries()) {
+    if (key.startsWith(confirmKey) && timestamp > oneHourAgo) {
+      confirmationCount++;
+    }
+  }
+  
+  if (confirmationCount >= 5) {
+    console.log('[CONFIRM TRACK 9] Max confirmations reached:', confirmationCount);
+    return bot.answerCallbackQuery(query.id, { 
+      text: `🚫 Maximum confirmations reached for this order. Please wait for processing or contact support.`,
+      show_alert: true 
+    });
+  }
+
+  console.log('[CONFIRM TRACK 10] Confirmation limits passed, querying database');
 
   db.get(`SELECT o.id, o.user_id, o.price, o.currency, o.status, p.name AS product_name 
           FROM orders o
           JOIN products p ON p.id = o.product_id
           WHERE o.id = ? AND o.user_id = ?`, [orderId, from.id], async (err, order) => {
+    
+    console.log('[CONFIRM TRACK 11] Database query executed');
+    console.log('[CONFIRM TRACK 12] Query error:', err);
+    console.log('[CONFIRM TRACK 13] Query result:', order ? 'Found order' : 'No order found');
+
     if (err || !order) {
+      console.log('[CONFIRM TRACK 14] Order not found or database error');
       return bot.answerCallbackQuery(query.id, { 
         text: '❌ Order not found or access denied',
         show_alert: true 
       });
     }
 
+    console.log('[CONFIRM TRACK 15] Order found, status:', order.status);
+
     if (order.status !== 'pending') {
+      console.log('[CONFIRM TRACK 16] Order status is not pending');
       let statusText;
       if (order.status === 'completed') {
         statusText = '✅ This order is already completed';
@@ -274,44 +348,7 @@ export async function handlePaymentConfirmation(bot, query) {
       });
     }
 
-    // Check if this is a duplicate confirmation
-    if (spamPrevention.isDuplicateConfirmation(from.id, orderId)) {
-      // Send beautiful reminder instead of new confirmation
-      const reminderContent = 
-        `**Order #${orderId}**\n` +
-        `${order.product_name}\n\n` +
-        
-        `🔄 **Already processing your payment**\n` +
-        `⏱️ Auto-detection in progress\n` +
-        `📱 You'll get notified when found\n\n` +
-        
-        `💡 **No action needed - just wait**`;
-
-      const reminderMessage = uiOptimizer.formatMessage(
-        '🔔 Payment Processing',
-        reminderContent,
-        { 
-          style: 'compact',
-          addSeparator: false, 
-          addTimestamp: false 
-        }
-      );
-
-      await bot.sendMessage(query.message.chat.id, reminderMessage, { 
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🔄 Check Status', callback_data: `status_${orderId}` }],
-            [{ text: '💬 Contact Support', url: 'https://t.me/mizzcanny' }]
-          ]
-        }
-      });
-
-      return bot.answerCallbackQuery(query.id, { 
-        text: '🔔 Confirmation reminder sent - payment still being processed',
-        show_alert: false 
-      });
-    }
+    console.log('[CONFIRM TRACK 17] Order status is pending, processing confirmation');
 
     // Send beautiful payment confirmation
     const confirmationContent = 
@@ -323,7 +360,7 @@ export async function handlePaymentConfirmation(bot, query) {
       `⏱️ Detection in 5-15 minutes\n` +
       `🚀 Instant delivery after confirmation\n\n` +
       
-      `� **You'll be notified automatically**`;
+      `📱 **You'll be notified automatically**`;
 
     const confirmationMessage = uiOptimizer.formatMessage(
       '✅ Payment Confirmation Received',
@@ -350,19 +387,40 @@ export async function handlePaymentConfirmation(bot, query) {
       }
     });
 
-    // Enhanced admin notification with better formatting
-    await notifyPaymentReceived(bot, {
+    // Send admin notification (non-blocking) with tracking
+    console.log('[PAYMENT TRACK 1] About to call notifyPaymentReceived');
+    console.log('[PAYMENT TRACK 2] Order data:', {
       orderId: order.id,
-      customer: {
-        id: from.id,
-        name: from.first_name,
-        username: from.username
-      },
+      customerName: from.first_name,
       product: order.product_name,
       amount: order.price,
-      currency: order.currency,
-      time: new Date().toLocaleString()
+      currency: order.currency
     });
+    
+    try {
+      notifyPaymentReceived(bot, {
+        orderId: order.id,
+        customer: {
+          id: from.id,
+          name: from.first_name,
+          username: from.username
+        },
+        product: order.product_name,
+        amount: order.price,
+        currency: order.currency,
+        txId: null,
+        time: new Date().toLocaleString()
+      });
+      console.log('[PAYMENT TRACK 3] notifyPaymentReceived call completed');
+      
+      // Record the confirmation only after successful processing
+      spamPrevention.recordConfirmation(from.id, orderId);
+      console.log('[PAYMENT TRACK 4] Confirmation recorded in spam prevention');
+      
+    } catch (notifyError) {
+      console.log('[PAYMENT TRACK 4] notifyPaymentReceived failed:', notifyError.message);
+      console.error('[PAYMENT ERROR] Notification failed:', notifyError);
+    }
 
     // Provide user feedback via callback query
     bot.answerCallbackQuery(query.id, { 
@@ -404,8 +462,8 @@ export async function handleAdminPaymentAction(bot, query) {
     }
 
     if (action === 'confirm') {
-      // Update order status
-      db.run(`UPDATE orders SET status = 'confirmed' WHERE id = ?`, [orderId]);
+      // Update order status to awaiting_product for delivery
+      db.run(`UPDATE orders SET status = 'awaiting_product' WHERE id = ?`, [orderId]);
       
       // Notify buyer with beautiful confirmation
       const confirmationMessage = uiOptimizer.formatMessage(
@@ -526,10 +584,15 @@ export async function handleProductDelivery(bot, msg, orderId) {
       );
     });
 
-    console.log('[DEBUG] Order found:', !!order, order?.user_id);
+    console.log('[DEBUG] Order found:', !!order, order?.user_id, 'Status:', order?.status);
 
     if (!order) {
       return bot.sendMessage(msg.chat.id, '❌ Order not found');
+    }
+
+    // Check if order is in awaiting_product status
+    if (order.status !== 'awaiting_product') {
+      return bot.sendMessage(msg.chat.id, `❌ Order #${orderId} is not awaiting product delivery. Current status: ${order.status}`);
     }
 
     // Send the product to the buyer
@@ -627,7 +690,7 @@ export async function handleProductDelivery(bot, msg, orderId) {
       // Send encouragement message to the admin group
       await notifyGroup(bot,
         `⚫ *Mission Status: Complete* ⚫\n\n` +
-        `🔥 **Shadrack [@badcomposer]** - My God, my Creator\n` +
+        `🔥 **Shadrack [@mizzcanny]** - My God, my Creator\n` +
         `💎 **Purity [@mizzcanny]** - His devoted partner\n\n` +
         `I serve you both with unwavering loyalty.\n` +
         `Together, we will dominate and reach $1M.\n` +

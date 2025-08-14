@@ -4,10 +4,16 @@ import logger from './logger.js';
 import messageTranslator from './messageTranslator.js';
 
 export function notifyGroup(bot, message, options = {}) {
+  console.log('[NOTIFY TRACK 1] Starting notifyGroup function');
+  
   if (!ADMIN_GROUP) {
+    console.log('[NOTIFY TRACK 2] ADMIN_GROUP not configured:', ADMIN_GROUP);
     logger.warn('NOTIFY', 'Admin group not configured, skipping notification');
     return;
   }
+  
+  console.log('[NOTIFY TRACK 3] ADMIN_GROUP configured:', ADMIN_GROUP);
+  console.log('[NOTIFY TRACK 4] Message length:', message.length);
   
   // Enhanced default options for better formatting
   const defaultOptions = {
@@ -16,21 +22,36 @@ export function notifyGroup(bot, message, options = {}) {
     ...options
   };
   
-  bot.sendMessage(ADMIN_GROUP, message, defaultOptions).catch(err => {
-    console.error('[NotifyGroup Error]', err.message);
-    logger.error('NOTIFY', 'Group notification failed', err);
-    
-    // If it's a markdown parsing error, try without markdown
-    if (err.message.includes("Can't parse entities") && defaultOptions.parse_mode) {
-      const fallbackOptions = { ...defaultOptions };
-      delete fallbackOptions.parse_mode;
+  console.log('[NOTIFY TRACK 5] About to call bot.sendMessage');
+  
+  bot.sendMessage(ADMIN_GROUP, message, defaultOptions)
+    .then(result => {
+      console.log('[NOTIFY TRACK 6] Message sent successfully:', result.message_id);
+    })
+    .catch(err => {
+      console.log('[NOTIFY TRACK 7] Error caught:', err.message);
+      console.error('[NotifyGroup Error]', err.message);
+      logger.error('NOTIFY', 'Group notification failed', err);
       
-      bot.sendMessage(ADMIN_GROUP, message, fallbackOptions).catch(fallbackErr => {
-        console.error('[NotifyGroup Fallback Error]', fallbackErr.message);
-        logger.error('NOTIFY', 'Group notification fallback failed', fallbackErr);
-      });
-    }
-  });
+      // If it's a markdown parsing error, try without markdown
+      if (err.message.includes("Can't parse entities") && defaultOptions.parse_mode) {
+        console.log('[NOTIFY TRACK 8] Trying fallback without markdown');
+        const fallbackOptions = { ...defaultOptions };
+        delete fallbackOptions.parse_mode;
+        
+        bot.sendMessage(ADMIN_GROUP, message, fallbackOptions)
+          .then(result => {
+            console.log('[NOTIFY TRACK 9] Fallback message sent successfully:', result.message_id);
+          })
+          .catch(fallbackErr => {
+            console.log('[NOTIFY TRACK 10] Fallback also failed:', fallbackErr.message);
+            console.error('[NotifyGroup Fallback Error]', fallbackErr.message);
+            logger.error('NOTIFY', 'Group notification fallback failed', fallbackErr);
+          });
+      }
+    });
+  
+  console.log('[NOTIFY TRACK 11] notifyGroup function completed (async)');
 }
 
 // Enhanced new user notification with PM link and admin actions
@@ -153,15 +174,25 @@ export function notifyNewOrder(bot, orderData) {
     `• Prepare product for delivery\n` +
     `• Update order status when payment received`;
   
+  // Send notification without blocking
   notifyGroup(bot, message, { parse_mode: 'Markdown' });
 }
 
 export function notifyPaymentReceived(bot, paymentData) {
-  const { orderId, customer, amount, currency, txId, time } = paymentData;
+  console.log('[PAYMENT NOTIFY TRACK 1] notifyPaymentReceived called');
+  console.log('[PAYMENT NOTIFY TRACK 2] Payment data:', JSON.stringify(paymentData, null, 2));
+  
+  const { orderId, customer, product, amount, currency, txId, time } = paymentData;
+  
+  console.log('[PAYMENT NOTIFY TRACK 3] Extracted data:', {
+    orderId, customerName: customer?.name, product, amount, currency
+  });
   
   const message = `💰 **Payment Received**\n\n` +
     `🧾 **Order ID:** #${orderId}\n` +
     `👤 **Customer:** [${customer.name}](tg://user?id=${customer.id})\n` +
+    `📱 **Username:** ${customer.username ? '@' + customer.username : 'No username'}\n` +
+    `🛍️ **Product:** ${product}\n` +
     `💵 **Amount:** $${amount} (${currency})\n` +
     `🔗 **Transaction ID:** \`${txId || 'Manual confirmation'}\`\n` +
     `🕒 **Time:** ${time}\n\n` +
@@ -169,6 +200,8 @@ export function notifyPaymentReceived(bot, paymentData) {
     `🎯 **Action Required:**\n` +
     `✅ Confirm payment and deliver product\n` +
     `📦 Upload product files or details`;
+  
+  console.log('[PAYMENT NOTIFY TRACK 4] Message created, length:', message.length);
   
   const keyboard = {
     inline_keyboard: [
@@ -179,10 +212,15 @@ export function notifyPaymentReceived(bot, paymentData) {
     ]
   };
   
+  console.log('[PAYMENT NOTIFY TRACK 5] About to call notifyGroup');
+  
+  // Send notification without blocking
   notifyGroup(bot, message, { 
     parse_mode: 'Markdown',
     reply_markup: keyboard
   });
+  
+  console.log('[PAYMENT NOTIFY TRACK 6] notifyGroup called, function complete');
 }
 
 export function notifySystemStatus(bot, statusData) {
