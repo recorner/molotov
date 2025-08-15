@@ -47,7 +47,7 @@ class NewsBroadcaster {
       let failedCount = 0;
       const failedUsers = [];
 
-      // Broadcast to users in batches to avoid rate limits
+      // Broadcast to users in batches with banner support
       const batchSize = 10; // Telegram rate limit friendly
       const delayBetweenBatches = 1000; // 1 second delay
 
@@ -170,7 +170,7 @@ class NewsBroadcaster {
   }
 
   /**
-   * Send message to individual user
+   * Send message to individual user with banner support
    * @param {Object} bot - Telegram bot instance
    * @param {Object} user - User object
    * @param {Object} announcement - Announcement object
@@ -179,12 +179,27 @@ class NewsBroadcaster {
     try {
       const message = this.formatMessageForUser(announcement, user);
       
-      await bot.sendMessage(user.telegram_id, message, {
-        parse_mode: 'Markdown',
-        disable_web_page_preview: true
-      });
+      // Try to send with banner first
+      try {
+        await bot.sendPhoto(user.telegram_id, './assets/image.png', {
+          caption: message,
+          parse_mode: 'Markdown',
+          disable_web_page_preview: true
+        });
 
-      logger.debug('NEWS_BROADCAST', `Message sent to user ${user.telegram_id} (${user.first_name})`);
+        logger.debug('NEWS_BROADCAST', `Message with banner sent to user ${user.telegram_id} (${user.first_name})`);
+        return;
+      } catch (photoError) {
+        // If banner fails, fallback to text message
+        logger.warn('NEWS_BROADCAST', `Banner failed for user ${user.telegram_id}, falling back to text`, photoError);
+        
+        await bot.sendMessage(user.telegram_id, message, {
+          parse_mode: 'Markdown',
+          disable_web_page_preview: true
+        });
+
+        logger.debug('NEWS_BROADCAST', `Fallback text message sent to user ${user.telegram_id} (${user.first_name})`);
+      }
       
     } catch (error) {
       // Handle specific Telegram errors
@@ -207,26 +222,27 @@ class NewsBroadcaster {
   }
 
   /**
-   * Format message for specific user
+   * Format message for specific user with enhanced banner styling
    * @param {Object} announcement - Announcement object
    * @param {Object} user - User object
    * @returns {string} Formatted message
    */
   formatMessageForUser(announcement, user) {
-    let message = announcement.content;
+    let message = '';
 
-    // Add personalization if first name is available
+    // Add personalized greeting
     if (user.first_name) {
-      // Check if message already has a greeting
-      if (!message.toLowerCase().includes('hello') && !message.toLowerCase().includes('dear')) {
-        message = `Hello ${user.first_name}! 👋\n\n${message}`;
-      }
+      message += `👋 Hello ${user.first_name}!\n\n`;
     }
 
-    // Add footer with announcement info
+    // Add the main announcement content
+    message += announcement.content;
+
+    // Add professional footer with branding
     message += `\n\n━━━━━━━━━━━━━━━━━━━━━\n`;
     message += `📢 *Official Announcement*\n`;
-    message += `🕒 ${new Date().toLocaleString()}`;
+    message += `🕒 ${new Date().toLocaleString()}\n`;
+    message += `🌟 Thank you for being part of our community!`;
 
     return message;
   }

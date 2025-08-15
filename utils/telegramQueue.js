@@ -62,7 +62,7 @@ class TelegramQueue {
   }
 
   /**
-   * Add message to queue
+   * Add message to queue with support for photos
    * @param {Object} messageData - Message data to queue
    * @returns {Promise<string>} Message ID
    */
@@ -73,7 +73,10 @@ class TelegramQueue {
       const queueItem = {
         id: messageId,
         chatId: messageData.chatId,
+        messageType: messageData.messageType || 'text', // 'text' or 'photo'
         text: messageData.text,
+        photo: messageData.photo || null, // Photo path for photo messages
+        caption: messageData.caption || null, // Caption for photo messages
         options: messageData.options || {},
         priority: messageData.priority || 'normal',
         maxRetries: messageData.maxRetries || 3,
@@ -87,7 +90,7 @@ class TelegramQueue {
       const score = this.calculatePriority(queueItem.priority);
       await this.redis.zadd(this.queueName, score, JSON.stringify(queueItem));
       
-      logger.debug('TELEGRAM_QUEUE', `Message queued: ${messageId} for chat ${messageData.chatId}`);
+      logger.debug('TELEGRAM_QUEUE', `Message queued: ${messageId} (${queueItem.messageType}) for chat ${messageData.chatId}`);
       
       return messageId;
     } catch (error) {
@@ -120,7 +123,10 @@ class TelegramQueue {
         const queueItem = {
           id: messageId,
           chatId: messageData.chatId,
-          text: messageData.text,
+          messageType: messageData.messageType || 'text',
+          text: messageData.text || null,
+          photo: messageData.photo || null,
+          caption: messageData.caption || null,
           options: messageData.options || {},
           priority: messageData.priority || 'broadcast',
           maxRetries: 3,
@@ -177,7 +183,15 @@ class TelegramQueue {
           // Add small delay to avoid rate limits
           await new Promise(resolve => setTimeout(resolve, index * 50));
           
-          await bot.sendMessage(messageData.chatId, messageData.text, messageData.options);
+          // Send photo or text message based on type
+          if (messageData.messageType === 'photo' && messageData.photo) {
+            await bot.sendPhoto(messageData.chatId, messageData.photo, {
+              caption: messageData.caption || messageData.text,
+              ...messageData.options
+            });
+          } else {
+            await bot.sendMessage(messageData.chatId, messageData.text || messageData.caption, messageData.options);
+          }
           
           // Record successful delivery
           if (messageData.announcementId && messageData.userId) {
@@ -308,7 +322,7 @@ class TelegramQueue {
   }
 
   /**
-   * Process individual message
+   * Process individual message with photo support
    * @param {Object} messageData - Message data
    */
   async processMessage(messageData) {
@@ -318,15 +332,30 @@ class TelegramQueue {
         throw new Error('Bot instance not available');
       }
 
-      // Send the message
-      await bot.sendMessage(messageData.chatId, messageData.text, messageData.options);
+      // Send photo or text message based on type
+      if (messageData.messageType === 'photo' && messageData.photo) {
+        // Try to send photo with caption
+        try {
+          await bot.sendPhoto(messageData.chatId, messageData.photo, {
+            caption: messageData.caption || messageData.text,
+            ...messageData.options
+          });
+        } catch (photoError) {
+          // If photo fails, fallback to text message
+          logger.warn('TELEGRAM_QUEUE', `Photo send failed for ${messageData.chatId}, fallback to text`, photoError);
+          await bot.sendMessage(messageData.chatId, messageData.caption || messageData.text, messageData.options);
+        }
+      } else {
+        // Send regular text message
+        await bot.sendMessage(messageData.chatId, messageData.text || messageData.caption, messageData.options);
+      }
       
       // Record successful delivery if part of announcement
       if (messageData.announcementId && messageData.userId) {
         await this.recordDelivery(messageData.announcementId, messageData.userId, 'sent');
       }
 
-      logger.debug('TELEGRAM_QUEUE', `Message sent successfully to ${messageData.chatId}`);
+      logger.debug('TELEGRAM_QUEUE', `Message sent successfully to ${messageData.chatId} (type: ${messageData.messageType || 'text'})`);
       
     } catch (error) {
       // Handle Telegram specific errors

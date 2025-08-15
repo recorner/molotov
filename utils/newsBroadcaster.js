@@ -38,10 +38,12 @@ class NewsBroadcaster {
       // Initialize broadcast tracking
       await this.initializeBroadcastRecord(announcement, users.length);
 
-      // Prepare messages for queue
+      // Prepare messages for queue - with banner support
       const messages = users.map(user => ({
         chatId: user.telegram_id,
-        text: this.formatMessageForUser(announcement, user),
+        messageType: 'photo', // Send as photo with banner
+        photo: './assets/image.png',
+        caption: this.formatMessageForUser(announcement, user),
         options: {
           parse_mode: 'Markdown',
           disable_web_page_preview: true
@@ -188,7 +190,7 @@ class NewsBroadcaster {
   }
 
   /**
-   * Send message to individual user (now used only for testing)
+   * Send message to individual user with banner support
    * @param {Object} bot - Telegram bot instance
    * @param {Object} user - User object
    * @param {Object} announcement - Announcement object
@@ -197,12 +199,27 @@ class NewsBroadcaster {
     try {
       const message = this.formatMessageForUser(announcement, user);
       
-      await bot.sendMessage(user.telegram_id, message, {
-        parse_mode: 'Markdown',
-        disable_web_page_preview: true
-      });
+      // Try to send with banner first
+      try {
+        await bot.sendPhoto(user.telegram_id, './assets/image.png', {
+          caption: message,
+          parse_mode: 'Markdown',
+          disable_web_page_preview: true
+        });
 
-      logger.debug('NEWS_BROADCAST', `Message sent to user ${user.telegram_id} (${user.first_name})`);
+        logger.debug('NEWS_BROADCAST', `Message with banner sent to user ${user.telegram_id} (${user.first_name})`);
+        return;
+      } catch (photoError) {
+        // If banner fails, fallback to text message
+        logger.warn('NEWS_BROADCAST', `Banner failed for user ${user.telegram_id}, falling back to text`, photoError);
+        
+        await bot.sendMessage(user.telegram_id, message, {
+          parse_mode: 'Markdown',
+          disable_web_page_preview: true
+        });
+
+        logger.debug('NEWS_BROADCAST', `Fallback text message sent to user ${user.telegram_id} (${user.first_name})`);
+      }
       
     } catch (error) {
       // Handle specific Telegram errors
@@ -225,26 +242,27 @@ class NewsBroadcaster {
   }
 
   /**
-   * Format message for specific user
+   * Format message for specific user with enhanced banner styling
    * @param {Object} announcement - Announcement object
    * @param {Object} user - User object
    * @returns {string} Formatted message
    */
   formatMessageForUser(announcement, user) {
-    let message = announcement.content;
+    let message = '';
 
-    // Add personalization if first name is available
+    // Add personalized greeting
     if (user.first_name) {
-      // Check if message already has a greeting
-      if (!message.toLowerCase().includes('hello') && !message.toLowerCase().includes('dear')) {
-        message = `Hello ${user.first_name}! 👋\n\n${message}`;
-      }
+      message += `👋 Hello ${user.first_name}!\n\n`;
     }
 
-    // Add footer with announcement info
+    // Add the main announcement content
+    message += announcement.content;
+
+    // Add professional footer with branding
     message += `\n\n━━━━━━━━━━━━━━━━━━━━━\n`;
     message += `📢 *Official Announcement*\n`;
-    message += `🕒 ${new Date().toLocaleString()}`;
+    message += `🕒 ${new Date().toLocaleString()}\n`;
+    message += `🌟 Thank you for being part of our community!`;
 
     return message;
   }
@@ -328,7 +346,7 @@ class NewsBroadcaster {
   }
 
   /**
-   * Test broadcast function - sends to a single user for testing
+   * Test broadcast function - sends to a single user for testing with banner
    * @param {Object} announcement - Announcement to test
    * @param {number} testUserId - User ID to send test to
    * @returns {Promise<Object>} Test result
@@ -357,18 +375,21 @@ class NewsBroadcaster {
         throw new Error('Test user not found in database');
       }
 
-      // Send test message
-      await this.sendMessageToUser(bot, testUser, {
+      // Create test announcement with banner styling
+      const testAnnouncement = {
         ...announcement,
         content: `🧪 **TEST MESSAGE**\n\n${announcement.content}\n\n⚠️ This is a test broadcast. Only you received this message.`
-      });
+      };
 
-      logger.info('NEWS_BROADCAST', `Test broadcast sent successfully to user ${testUserId}`);
+      // Send test message with banner
+      await this.sendMessageToUser(bot, testUser, testAnnouncement);
+
+      logger.info('NEWS_BROADCAST', `Test broadcast with banner sent successfully to user ${testUserId}`);
       
       return {
         success: true,
         testUser: testUser.first_name,
-        message: 'Test message sent successfully'
+        message: 'Test message with banner sent successfully'
       };
 
     } catch (error) {

@@ -1006,30 +1006,58 @@ async function handleTestSend(bot, query, data) {
   }
   
   try {
-    // Send test message to the admin
-    await bot.sendMessage(userId, `🧪 **TEST MESSAGE**\n\n` +
-      `This is how your announcement will look:\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `${session.content}\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `📋 Title: ${session.title}\n` +
-      `🎯 Target: ${getLanguageFlag(session.lang)} ${getLanguageName(session.lang)}\n` +
-      `📝 Type: ${getTypeIcon(session.type)} ${getTypeName(session.type)}`, {
+    // Send test message with banner to the admin
+    await bot.sendPhoto(userId, './assets/image.png', {
+      caption: `🧪 **TEST MESSAGE PREVIEW**\n\n` +
+        `This is how your announcement will look to users:\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `👋 Hello [User Name]!\n\n` +
+        `${session.content}\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
+        `📢 *Official Announcement*\n` +
+        `� ${new Date().toLocaleString()}\n` +
+        `🌟 Thank you for being part of our community!\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `�📋 Title: ${session.title}\n` +
+        `🎯 Target: ${getLanguageFlag(session.lang)} ${getLanguageName(session.lang)}\n` +
+        `📝 Type: ${getTypeIcon(session.type)} ${getTypeName(session.type)}`,
       parse_mode: 'Markdown'
     });
     
     return bot.answerCallbackQuery(query.id, { 
-      text: '🧪 Test message sent to your private chat!', 
+      text: '🧪 Test message with banner sent to your private chat!', 
       show_alert: true 
     });
     
   } catch (error) {
     logger.error('NEWS', `Failed to send test message to ${userId}`, error);
     
-    return bot.answerCallbackQuery(query.id, { 
-      text: '❌ Failed to send test message. Please check your DMs with the bot.', 
-      show_alert: true 
-    });
+    // Fallback to text message if photo fails
+    try {
+      await bot.sendMessage(userId, `🧪 **TEST MESSAGE (Text Only)**\n\n` +
+        `Banner image failed to load, but here's how your text will look:\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `👋 Hello [User Name]!\n\n` +
+        `${session.content}\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
+        `📢 *Official Announcement*\n` +
+        `🕒 ${new Date().toLocaleString()}\n` +
+        `🌟 Thank you for being part of our community!`, {
+        parse_mode: 'Markdown'
+      });
+      
+      return bot.answerCallbackQuery(query.id, { 
+        text: '🧪 Test message sent (banner failed, text only)', 
+        show_alert: true 
+      });
+    } catch (fallbackError) {
+      logger.error('NEWS', `Failed to send fallback test message to ${userId}`, fallbackError);
+      
+      return bot.answerCallbackQuery(query.id, { 
+        text: '❌ Failed to send test message. Please check your DMs with the bot.', 
+        show_alert: true 
+      });
+    }
   }
 }
 
