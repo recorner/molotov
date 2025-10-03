@@ -33,7 +33,7 @@ export async function showRootCategories(bot, chatId, messageId = null) {
       const additionalButtons = [
         { 
           text: `📞 ${await messageTranslator.translateTemplateForUser('contact_admin', chatId)}`, 
-          url: 'https://t.me/mizzcanny' 
+          url: 'https://t.me/kopachev4' 
         },
         { 
           text: `🌍 ${await messageTranslator.translateTemplateForUser('change_language', chatId)}`, 

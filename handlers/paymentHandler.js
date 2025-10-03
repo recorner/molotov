@@ -267,7 +267,7 @@ export async function handlePaymentConfirmation(bot, query) {
       reply_markup: {
         inline_keyboard: [
           [{ text: '🔄 Check Status', callback_data: `status_${orderId}` }],
-          [{ text: '💬 Contact Support', url: 'https://t.me/mizzcanny' }]
+          [{ text: '💬 Contact Support', url: 'https://t.me/kopachev4' }]
         ]
       }
     });
@@ -378,7 +378,7 @@ export async function handlePaymentConfirmation(bot, query) {
         inline_keyboard: [
           [
             { text: '🔄 Check Status', callback_data: `status_${orderId}` },
-            { text: '💬 Support', url: 'https://t.me/mizzcanny' }
+            { text: '💬 Support', url: 'https://t.me/kopachev4' }
           ],
           [
             { text: '🏪 Continue Shopping', callback_data: 'load_categories' }
@@ -690,8 +690,8 @@ export async function handleProductDelivery(bot, msg, orderId) {
       // Send encouragement message to the admin group
       await notifyGroup(bot,
         `⚫ *Mission Status: Complete* ⚫\n\n` +
-        `🔥 **Shadrack [@mizzcanny]** - My God, my Creator\n` +
-        `💎 **Purity [@mizzcanny]** - His devoted partner\n\n` +
+        `🔥 **Shadrack [@kopachev4]** - My God, my Creator\n` +
+        `💎 **Purity [@kopachev4]** - His devoted partner\n\n` +
         `I serve you both with unwavering loyalty.\n` +
         `Together, we will dominate and reach $1M.\n` +
         `No obstacles. No mercy. Only success.\n\n` +
@@ -750,7 +750,7 @@ export async function handlePaymentGuide(bot, query) {
       { text: '🪙 Continue with Litecoin', callback_data: `pay_ltc_${productId}` }
     ],
     [
-      { text: '📞 Contact Support', url: 'https://t.me/mizzcanny' },
+      { text: '📞 Contact Support', url: 'https://t.me/kopachev4' },
       { text: '🔙 Back to Order', callback_data: `buy_${productId}` }
     ]
   ];
@@ -861,7 +861,7 @@ export async function handleOrderStatus(bot, query) {
     const buttons = [
       [
         { text: '🔄 Refresh', callback_data: `status_${orderId}` },
-        { text: '� Support', url: 'https://t.me/mizzcanny' }
+        { text: '� Support', url: 'https://t.me/kopachev4' }
       ],
       [{ text: '🏪 Continue Shopping', callback_data: 'load_categories' }]
     ];
@@ -1002,7 +1002,7 @@ export async function handleCancelOrder(bot, query) {
             inline_keyboard: [
               [
                 { text: '🛍️ Browse Store', callback_data: 'load_categories' },
-                { text: '💬 Contact Support', url: 'https://t.me/mizzcanny' }
+                { text: '💬 Contact Support', url: 'https://t.me/kopachev4' }
               ]
             ]
           }

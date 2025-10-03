@@ -113,7 +113,7 @@ export async function showCategoriesMenu(bot, userId, isWelcome = true) {
               }],
               [{ 
                 text: await messageTranslator.translateTemplateForUser('contact_admin', userId), 
-                url: `https://t.me/${SUPPORT_USERNAME || 'mizzcanny'}` 
+                url: `https://t.me/${SUPPORT_USERNAME || 'kopachev4'}` 
               }],
               [{ 
                 text: await messageTranslator.translateTemplateForUser('change_language', userId), 
@@ -157,7 +157,7 @@ export async function showCategoriesMenu(bot, userId, isWelcome = true) {
             buttons.push([
               { 
                 text: await messageTranslator.translateTemplateForUser('contact_admin', userId), 
-                url: `https://t.me/${SUPPORT_USERNAME || 'mizzcanny'}` 
+                url: `https://t.me/${SUPPORT_USERNAME || 'kopachev4'}` 
               }
             ]);
             
