@@ -2,7 +2,7 @@
 
 import db from '../database.js';
 import { formatTimeAgo } from '../utils/date.js';
-import { ADMIN_IDS } from '../config.js';
+import adminManager from '../utils/adminManager.js';
 import { handleAdminCommand } from './adminHandler.js';
 import { safeEditMessage } from '../utils/safeMessageEdit.js';
 import smartMessageManager from '../utils/smartMessageManager.js';
@@ -526,7 +526,7 @@ export async function handleWalletFinalSave(bot, query) {
         });
 
         // Notify other admins
-        const notificationPromises = ADMIN_IDS
+        const notificationPromises = adminManager.getAdminIds()
             .filter(id => id !== userId)
             .map(adminId => {
                 const notification = uiOptimizer.formatMessage(

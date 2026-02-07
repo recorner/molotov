@@ -1,6 +1,6 @@
 // scheduler.js
 import cron from 'node-cron';
-import { ADMIN_IDS } from './config.js';
+import adminManager from './utils/adminManager.js';
 import { getTodayISODate } from './utils/date.js'; // renamed for clarity
 
 let addressUpdateConfirmed = false;
@@ -14,7 +14,8 @@ export function setupDailyWalletPrompt(bot) {
         addressUpdateConfirmed = false;
         promptMessageMap = {};
 
-        ADMIN_IDS.forEach(async (adminId) => {
+        const adminIds = adminManager.getAdminIds();
+        adminIds.forEach(async (adminId) => {
             try {
                 const msg = await bot.sendMessage(adminId, `🔁 *Daily Wallet Update Check*\n\nWould you like to update the wallet addresses today?`, {
                     parse_mode: 'Markdown',
@@ -68,7 +69,8 @@ export function handleWalletPromptResponse(bot, query) {
     if (response === 'yes') {
         addressUpdateConfirmed = true;
 
-        for (const otherAdminId of ADMIN_IDS) {
+        const currentAdminIds = adminManager.getAdminIds();
+        for (const otherAdminId of currentAdminIds) {
             if (otherAdminId !== userId && promptMessageMap[otherAdminId]) {
                 bot.editMessageText('⚠️ Another admin has already updated the address today.', {
                     chat_id: otherAdminId,

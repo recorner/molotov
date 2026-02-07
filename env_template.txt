@@ -62,6 +62,11 @@ USERNAME_SYNC_CRON=0 3 * * *
 # Timezone for the cron schedule (IANA format)
 USERNAME_SYNC_TIMEZONE=Africa/Nairobi
 
+# === ADMIN SYSTEM ===
+# How often the bot re-checks the admin group for admin changes (milliseconds)
+# Default: 60000 (60 seconds)
+ADMIN_POLL_INTERVAL=60000
+
 # === INSTRUCTIONS ===
 # 1. Get BlockCypher API key (optional for free tier): https://accounts.blockcypher.com/
 # 2. Copy this file to .env and fill in your API keys if desired

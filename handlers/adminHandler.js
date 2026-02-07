@@ -1,6 +1,5 @@
 // Enhanced Admin Handler with UI Improvements
 import db from '../database.js';
-import { ADMIN_IDS } from '../config.js';
 import adminManager from '../utils/adminManager.js';
 import logger from '../utils/logger.js';
 import smartMessageManager from '../utils/smartMessageManager.js';

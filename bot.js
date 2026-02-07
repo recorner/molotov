@@ -381,6 +381,9 @@ bot.onText(/^\/(addcategory|addsubcategory|addproduct)(.*)/, (msg) => {
 bot.onText(/\/cocktail/, (msg) => handleAdminCommand(bot, msg));
 bot.onText(/\/poke/, (msg) => handlePokeCommand(bot, msg));
 bot.onText(/\/merger/, (msg) => usernameNormalizer.handleMergerCommand(bot, msg));
+bot.onText(/\/heads/, (msg) => adminManager.handleHeadsCommand(bot, msg));
+bot.onText(/\/promote/, (msg) => adminManager.handlePromoteCommand(bot, msg));
+bot.onText(/\/demote/, (msg) => adminManager.handleDemoteCommand(bot, msg));
 
 // News and announcements command (restricted to admins)
 bot.onText(/\/news/, (msg) => handleNewsCommand(bot, msg));

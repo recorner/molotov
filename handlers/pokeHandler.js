@@ -1,5 +1,5 @@
 // handlers/pokeHandler.js
-import { ADMIN_IDS } from '../config.js';
+import adminManager from '../utils/adminManager.js';
 import logger from '../utils/logger.js';
 import db from '../database.js';
 
@@ -10,7 +10,8 @@ export async function handlePokeCommand(bot, msg) {
   const { text, from, chat } = msg;
   
   // Check if user is admin
-  if (!ADMIN_IDS.includes(from.id)) {
+  const isUserAdmin = await adminManager.isAdmin(from.id);
+  if (!isUserAdmin) {
     await bot.sendMessage(chat.id, '❌ This command is only available for administrators.');
     return;
   }
