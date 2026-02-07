@@ -58,7 +58,7 @@ export async function handleTomcatCommand(bot, msg) {
 
   const isAdmin = await adminManager.isAdmin(userId);
   if (!isAdmin) {
-    return bot.sendMessage(chatId, '⛔ This command is restricted to administrators.');
+    return bot.sendMessage(chatId, '🚫 Admin access required.');
   }
 
   clearState(userId);
@@ -66,22 +66,20 @@ export async function handleTomcatCommand(bot, msg) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  Main Menu
+//  MAIN MENU
 // ═══════════════════════════════════════════════════════════════════════
 
 async function showMainMenu(bot, chatId, userId, messageId = null) {
   const stats = await productManager.getStats();
 
   const text =
-    `📦 *Product Management Hub*\n\n` +
+    `🐱 *Product Manager — Tomcat*\n\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
-    `📊 *Current Inventory*\n` +
-    `• Categories: *${stats.activeCategories}*\n` +
-    `• Products: *${stats.activeProducts}*\n` +
-    `• Archived: *${stats.archivedProducts}*\n` +
-    `• History entries: *${stats.historyEntries}*\n` +
-    `━━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `Select a section below:`;
+    `📂 Categories: *${stats.activeCategories}*\n` +
+    `🛍️ Active Products: *${stats.activeProducts}*\n` +
+    `🗄️ Archived: *${stats.archivedProducts}*\n` +
+    `📜 History Entries: *${stats.historyEntries}*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━`;
 
   const buttons = [
     [
@@ -89,12 +87,12 @@ async function showMainMenu(bot, chatId, userId, messageId = null) {
       { text: '🛍️ Products', callback_data: 'pm_prod_menu' }
     ],
     [
-      { text: '📤 Bulk Import', callback_data: 'pm_bulk_menu' },
-      { text: '📥 Export', callback_data: 'pm_export_menu' }
+      { text: '📥 Bulk Import', callback_data: 'pm_bulk_menu' },
+      { text: '📤 Export', callback_data: 'pm_export_menu' }
     ],
     [
-      { text: '🕰️ History & Undo', callback_data: 'pm_history_menu' },
-      { text: '🔍 Search', callback_data: 'pm_search_start' }
+      { text: '🔍 Search', callback_data: 'pm_search_start' },
+      { text: '📜 History', callback_data: 'pm_history_menu' }
     ],
     [{ text: '❌ Close', callback_data: 'pm_close' }]
   ];
@@ -106,42 +104,21 @@ async function showMainMenu(bot, chatId, userId, messageId = null) {
 //  CATEGORY MENU
 // ═══════════════════════════════════════════════════════════════════════
 
-async function showCategoryMenu(bot, chatId, messageId) {
-  const tree = await productManager.getCategoryTree();
-  const roots = tree.filter(c => c.parent_id === null);
+async function showCategoryMenu(bot, chatId, messageId = null) {
+  const roots = await productManager.getRootCategories();
 
-  let listing = '';
+  let text = `📂 *Category Management*\n\n`;
   if (roots.length === 0) {
-    listing = '_No categories yet._';
+    text += `_No categories yet. Create one below._`;
   } else {
-    for (const root of roots) {
-      const subs = tree.filter(c => c.parent_id === root.id);
-      listing += `📁 *${root.name}* — ${root.productCount} products`;
-      if (subs.length > 0) listing += `, ${subs.length} sub`;
-      listing += '\n';
-      for (const sub of subs) {
-        listing += `   └ ${sub.name} — ${sub.productCount} products\n`;
-      }
+    for (const cat of roots) {
+      text += `• *${cat.name}* — ${cat.childCount} subs, ${cat.productCount} items\n`;
     }
   }
 
-  const text =
-    `📂 *Category Management*\n\n` +
-    `━━━━━━━━━━━━━━━━━━━━━\n` +
-    listing +
-    `━━━━━━━━━━━━━━━━━━━━━`;
-
-  const buttons = [
-    [
-      { text: '➕ Add Root Category', callback_data: 'pm_cat_add_root' },
-      { text: '➕ Add Subcategory', callback_data: 'pm_cat_add_sub_pick' }
-    ],
-    [
-      { text: '✏️ Rename', callback_data: 'pm_cat_rename_pick' },
-      { text: '🗑️ Delete', callback_data: 'pm_cat_del_pick' }
-    ],
-    [{ text: '🔙 Back', callback_data: 'pm_main' }]
-  ];
+  const buttons = roots.map(c => [{ text: `📂 ${c.name}`, callback_data: `pm_cat_view_${c.id}` }]);
+  buttons.push([{ text: '➕ Add Root Category', callback_data: 'pm_cat_add_root' }]);
+  buttons.push([{ text: '🔙 Main Menu', callback_data: 'pm_main' }]);
 
   return send(bot, chatId, text, buttons, messageId);
 }
@@ -150,10 +127,12 @@ async function showCategoryMenu(bot, chatId, messageId) {
 //  PRODUCT MENU
 // ═══════════════════════════════════════════════════════════════════════
 
-async function showProductMenu(bot, chatId, messageId) {
+async function showProductMenu(bot, chatId, messageId = null) {
+  const stats = await productManager.getStats();
+
   const text =
     `🛍️ *Product Management*\n\n` +
-    `Select an action:`;
+    `Active: *${stats.activeProducts}* | Archived: *${stats.archivedProducts}*`;
 
   const buttons = [
     [
@@ -162,93 +141,113 @@ async function showProductMenu(bot, chatId, messageId) {
     ],
     [
       { text: '➕ Add Product', callback_data: 'pm_prod_add_cat' },
-      { text: '🗑️ Archived Items', callback_data: 'pm_prod_archived_1' }
+      { text: '🗄️ Archived Items', callback_data: 'pm_prod_archived_1' }
     ],
-    [{ text: '🔙 Back', callback_data: 'pm_main' }]
+    [
+      { text: '💣 Nuke All Products', callback_data: 'pm_nuke_start' }
+    ],
+    [{ text: '🔙 Main Menu', callback_data: 'pm_main' }]
   ];
 
   return send(bot, chatId, text, buttons, messageId);
 }
 
-// ── Browse products by category ──
+// ═══════════════════════════════════════════════════════════════════════
+//  BROWSE CATEGORIES (for product listing)
+// ═══════════════════════════════════════════════════════════════════════
 
-async function showProductBrowseCategories(bot, chatId, messageId) {
-  const tree = await productManager.getCategoryTree();
-  // Show all categories that have products OR have subcategories with products
-  const allCats = tree.filter(c => c.productCount > 0 || c.childCount > 0);
+async function showBrowseCategories(bot, chatId, messageId = null) {
+  const roots = await productManager.getRootCategories();
 
-  if (allCats.length === 0) {
-    return send(bot, chatId, '📭 No categories with products.', [[{ text: '🔙 Back', callback_data: 'pm_prod_menu' }]], messageId);
-  }
+  const buttons = roots.map(c => [
+    { text: `📂 ${c.name} (${c.productCount + c.childCount})`, callback_data: `pm_prod_cat_${c.id}` }
+  ]);
+  buttons.push([{ text: '🔙 Products', callback_data: 'pm_prod_menu' }]);
 
-  const buttons = [];
-  const roots = allCats.filter(c => c.parent_id === null);
-  for (const root of roots) {
-    buttons.push([{
-      text: `📁 ${root.name} (${root.productCount})`,
-      callback_data: `pm_prod_list_${root.id}_1`
-    }]);
-    // Also show subcategories inline
-    const subs = allCats.filter(c => c.parent_id === root.id);
-    if (subs.length > 0) {
-      const subRow = subs.slice(0, 3).map(s => ({
-        text: `└ ${s.name} (${s.productCount})`,
-        callback_data: `pm_prod_list_${s.id}_1`
-      }));
-      buttons.push(subRow);
-    }
-  }
-  buttons.push([{ text: '🔙 Back', callback_data: 'pm_prod_menu' }]);
-
-  return send(bot, chatId, `📂 *Select a category to browse:*`, buttons, messageId);
+  return send(bot, chatId, `📂 *Browse Products by Category*\n\nSelect a category:`, buttons, messageId);
 }
 
-// ── Paginated product list ──
+// ═══════════════════════════════════════════════════════════════════════
+//  PRODUCT LIST (in category)
+// ═══════════════════════════════════════════════════════════════════════
 
-async function showProductList(bot, chatId, categoryId, page, messageId) {
-  const result = await productManager.searchProducts({ categoryId, status: 'active', page, pageSize: 8 });
+async function showProductList(bot, chatId, categoryId, page, messageId = null) {
   const cat = await productManager.getCategory(categoryId);
+  const subs = await productManager.getSubcategories(categoryId);
+  const isLeaf = await productManager.isLeafCategory(categoryId);
+  const result = await productManager.searchProducts({ categoryId, status: 'active', page, pageSize: 8 });
 
-  if (result.products.length === 0) {
-    return send(bot, chatId, `📭 No active products in *${cat?.name || 'this category'}*.`,
-      [[{ text: '🔙 Back', callback_data: 'pm_prod_browse' }]], messageId);
+  let text = `📂 *${cat?.name || 'Unknown'}*\n\n`;
+
+  // Show subcategories first
+  const buttons = [];
+  if (subs.length > 0) {
+    text += `📁 *Subcategories:*\n`;
+    for (const s of subs) {
+      text += `  • ${s.name} (${s.productCount} items)\n`;
+    }
+    text += '\n';
+    for (const s of subs) {
+      buttons.push([{ text: `📂 ${s.name} (${s.productCount})`, callback_data: `pm_prod_cat_${s.id}` }]);
+    }
   }
 
-  let text = `🛍️ *${cat?.name || 'Products'}* — Page ${result.page}/${result.totalPages} (${result.total} total)\n\n`;
+  // Show products
+  if (result.products.length > 0) {
+    text += `🛍️ *Products (${result.total}):*\n`;
+    for (const p of result.products) {
+      const stock = p.stock_quantity === -1 ? '∞' : p.stock_quantity;
+      text += `• ${p.name} — $${p.price} [${stock}]\n`;
+    }
+  } else if (subs.length === 0) {
+    text += `_No products in this category._`;
+  }
 
-  const prodButtons = [];
+  // Product buttons
   for (const p of result.products) {
-    const stock = p.stock_quantity === -1 ? '∞' : p.stock_quantity;
-    text += `• *${p.name}* — $${p.price} [${stock}]\n`;
-    prodButtons.push([{
-      text: `✏️ ${p.name.substring(0, 30)}`,
-      callback_data: `pm_prod_view_${p.id}`
-    }]);
+    buttons.push([{ text: `🛍️ ${p.name}`, callback_data: `pm_prod_view_${p.id}` }]);
   }
 
   // Pagination
-  const navRow = [];
-  if (result.page > 1) navRow.push({ text: '⬅️ Prev', callback_data: `pm_prod_list_${categoryId}_${result.page - 1}` });
-  navRow.push({ text: `${result.page}/${result.totalPages}`, callback_data: 'pm_noop' });
-  if (result.page < result.totalPages) navRow.push({ text: 'Next ➡️', callback_data: `pm_prod_list_${categoryId}_${result.page + 1}` });
-  prodButtons.push(navRow);
-  prodButtons.push([{ text: '🔙 Back', callback_data: 'pm_prod_browse' }]);
+  if (result.totalPages > 1) {
+    const paginationRow = [];
+    if (result.page > 1) paginationRow.push({ text: '◀️ Prev', callback_data: `pm_prod_list_${categoryId}_${result.page - 1}` });
+    paginationRow.push({ text: `📄 ${result.page}/${result.totalPages}`, callback_data: 'pm_noop' });
+    if (result.page < result.totalPages) paginationRow.push({ text: 'Next ▶️', callback_data: `pm_prod_list_${categoryId}_${result.page + 1}` });
+    buttons.push(paginationRow);
+  }
 
-  return send(bot, chatId, text, prodButtons, messageId);
+  // Action buttons (only for leaf categories)
+  if (isLeaf) {
+    buttons.push([
+      { text: '➕ Add Product Here', callback_data: `pm_prod_add_in_${categoryId}` },
+      { text: '📥 Bulk Import Here', callback_data: `pm_bulk_to_cat_${categoryId}` }
+    ]);
+  }
+
+  // Back: go to parent category, or browse root
+  if (cat?.parent_id) {
+    buttons.push([{ text: '🔙 Back', callback_data: `pm_prod_cat_${cat.parent_id}` }]);
+  } else {
+    buttons.push([{ text: '🔙 Browse', callback_data: 'pm_prod_browse' }]);
+  }
+
+  return send(bot, chatId, text, buttons, messageId);
 }
 
-// ── View single product ──
+// ═══════════════════════════════════════════════════════════════════════
+//  PRODUCT VIEW (single product detail)
+// ═══════════════════════════════════════════════════════════════════════
 
-async function showProductView(bot, chatId, productId, messageId) {
+async function showProductView(bot, chatId, productId, messageId = null) {
   const p = await productManager.getProduct(productId);
   if (!p) return send(bot, chatId, '❌ Product not found.', [[{ text: '🔙 Back', callback_data: 'pm_prod_menu' }]], messageId);
 
   const stock = p.stock_quantity === -1 ? '∞ Unlimited' : String(p.stock_quantity);
   const text =
-    `🛍️ *Product Details*\n\n` +
+    `🛍️ *${p.name}*\n\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
-    `📌 *Name:* ${p.name}\n` +
-    `📝 *Description:* ${p.description || '—'}\n` +
+    `📝 ${p.description || '_No description_'}\n` +
     `💰 *Price:* $${p.price}\n` +
     `📦 *Stock:* ${stock}\n` +
     `🏷️ *SKU:* ${p.sku || '—'}\n` +
@@ -259,82 +258,86 @@ async function showProductView(bot, chatId, productId, messageId) {
 
   const buttons = [
     [
-      { text: '✏️ Edit Name', callback_data: `pm_edit_name_${p.id}` },
-      { text: '💰 Edit Price', callback_data: `pm_edit_price_${p.id}` }
+      { text: '✏️ Name', callback_data: `pm_edit_name_${p.id}` },
+      { text: '💰 Price', callback_data: `pm_edit_price_${p.id}` },
+      { text: '📝 Desc', callback_data: `pm_edit_desc_${p.id}` }
     ],
     [
-      { text: '📝 Edit Description', callback_data: `pm_edit_desc_${p.id}` },
-      { text: '📦 Edit Stock', callback_data: `pm_edit_stock_${p.id}` }
-    ],
-    [
-      { text: '📂 Move Category', callback_data: `pm_edit_cat_${p.id}` },
-      { text: '🏷️ Edit SKU', callback_data: `pm_edit_sku_${p.id}` }
-    ],
-    [
-      { text: '🗑️ Delete Product', callback_data: `pm_prod_del_${p.id}` }
-    ],
-    [{ text: '🔙 Back', callback_data: `pm_prod_list_${p.category_id}_1` }]
+      { text: '📦 Stock', callback_data: `pm_edit_stock_${p.id}` },
+      { text: '🏷️ SKU', callback_data: `pm_edit_sku_${p.id}` },
+      { text: '📂 Move', callback_data: `pm_edit_cat_${p.id}` }
+    ]
   ];
 
-  return send(bot, chatId, text, buttons, messageId);
-}
-
-// ── Archived products list ──
-
-async function showArchivedProducts(bot, chatId, page, messageId) {
-  const result = await productManager.searchProducts({ status: 'archived', page, pageSize: 8 });
-
-  if (result.products.length === 0) {
-    return send(bot, chatId, '📭 No archived products.', [[{ text: '🔙 Back', callback_data: 'pm_prod_menu' }]], messageId);
+  if (p.status === 'active') {
+    buttons.push([{ text: '🗑️ Delete (Archive)', callback_data: `pm_prod_del_${p.id}` }]);
+  } else {
+    buttons.push([{ text: '♻️ Restore', callback_data: `pm_prod_restore_${p.id}` }]);
   }
 
-  let text = `🗑️ *Archived Products* — Page ${result.page}/${result.totalPages}\n\n`;
-  const buttons = [];
-  for (const p of result.products) {
-    text += `• ~~${p.name}~~ — $${p.price}\n`;
-    buttons.push([{
-      text: `♻️ Restore: ${p.name.substring(0, 25)}`,
-      callback_data: `pm_prod_restore_${p.id}`
-    }]);
-  }
-
-  const navRow = [];
-  if (result.page > 1) navRow.push({ text: '⬅️ Prev', callback_data: `pm_prod_archived_${result.page - 1}` });
-  if (result.page < result.totalPages) navRow.push({ text: 'Next ➡️', callback_data: `pm_prod_archived_${result.page + 1}` });
-  if (navRow.length) buttons.push(navRow);
-  buttons.push([{ text: '🔙 Back', callback_data: 'pm_prod_menu' }]);
+  buttons.push([{ text: '🔙 Back', callback_data: p.category_id ? `pm_prod_cat_${p.category_id}` : 'pm_prod_menu' }]);
 
   return send(bot, chatId, text, buttons, messageId);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  SEARCH
+//  ARCHIVED PRODUCTS
 // ═══════════════════════════════════════════════════════════════════════
 
-async function showSearchResults(bot, chatId, query, page, messageId) {
-  const result = await productManager.searchProducts({ query, page, pageSize: 8 });
+async function showArchivedProducts(bot, chatId, page, messageId = null) {
+  const result = await productManager.searchProducts({ status: 'archived', page, pageSize: 10 });
 
   if (result.total === 0) {
-    return send(bot, chatId, `🔍 No products matching *"${query}"*.`,
-      [[{ text: '🔙 Back', callback_data: 'pm_main' }]], messageId);
+    return send(bot, chatId, '🗄️ *Archived Products*\n\n_No archived products._', [[{ text: '🔙 Products', callback_data: 'pm_prod_menu' }]], messageId);
   }
 
-  let text = `🔍 *Search: "${query}"* — ${result.total} results (page ${result.page}/${result.totalPages})\n\n`;
+  let text = `🗄️ *Archived Products (${result.total})*\n\n`;
   const buttons = [];
+
   for (const p of result.products) {
-    text += `• *${p.name}* — $${p.price} [${p.category_name || '?'}]\n`;
-    buttons.push([{
-      text: `✏️ ${p.name.substring(0, 30)}`,
-      callback_data: `pm_prod_view_${p.id}`
-    }]);
+    text += `• ${p.name} — $${p.price} (${p.category_name || '?'})\n`;
+    buttons.push([
+      { text: `♻️ Restore: ${p.name}`, callback_data: `pm_prod_restore_${p.id}` }
+    ]);
   }
 
-  const navRow = [];
-  if (result.page > 1) navRow.push({ text: '⬅️ Prev', callback_data: `pm_search_page_${result.page - 1}` });
-  if (result.page < result.totalPages) navRow.push({ text: 'Next ➡️', callback_data: `pm_search_page_${result.page + 1}` });
-  if (navRow.length) buttons.push(navRow);
-  buttons.push([{ text: '🔙 Back', callback_data: 'pm_main' }]);
+  if (result.totalPages > 1) {
+    const pag = [];
+    if (result.page > 1) pag.push({ text: '◀️', callback_data: `pm_prod_archived_${result.page - 1}` });
+    pag.push({ text: `${result.page}/${result.totalPages}`, callback_data: 'pm_noop' });
+    if (result.page < result.totalPages) pag.push({ text: '▶️', callback_data: `pm_prod_archived_${result.page + 1}` });
+    buttons.push(pag);
+  }
 
+  buttons.push([{ text: '🔙 Products', callback_data: 'pm_prod_menu' }]);
+  return send(bot, chatId, text, buttons, messageId);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  SEARCH RESULTS
+// ═══════════════════════════════════════════════════════════════════════
+
+async function showSearchResults(bot, chatId, query, page, messageId = null) {
+  const result = await productManager.searchProducts({ query, page, pageSize: 10 });
+
+  let text = `🔍 *Search: "${query}"*\n\nFound *${result.total}* results.\n\n`;
+  const buttons = [];
+
+  for (const p of result.products) {
+    const stock = p.stock_quantity === -1 ? '∞' : p.stock_quantity;
+    text += `• *${p.name}* — $${p.price} [${stock}] (${p.category_name || '?'})\n`;
+    buttons.push([{ text: `🛍️ ${p.name}`, callback_data: `pm_prod_view_${p.id}` }]);
+  }
+
+  if (result.totalPages > 1) {
+    const pag = [];
+    if (result.page > 1) pag.push({ text: '◀️', callback_data: `pm_search_page_${result.page - 1}` });
+    pag.push({ text: `${result.page}/${result.totalPages}`, callback_data: 'pm_noop' });
+    if (result.page < result.totalPages) pag.push({ text: '▶️', callback_data: `pm_search_page_${result.page + 1}` });
+    buttons.push(pag);
+  }
+
+  buttons.push([{ text: '🔍 New Search', callback_data: 'pm_search_start' }, { text: '🔙 Main Menu', callback_data: 'pm_main' }]);
   return send(bot, chatId, text, buttons, messageId);
 }
 
@@ -342,52 +345,53 @@ async function showSearchResults(bot, chatId, query, page, messageId) {
 //  BULK MENU
 // ═══════════════════════════════════════════════════════════════════════
 
-async function showBulkMenu(bot, chatId, messageId) {
+async function showBulkMenu(bot, chatId, messageId = null) {
   const text =
-    `📤 *Bulk Operations*\n\n` +
-    `*Import Format (CSV):*\n` +
-    `\`sku,name,description,price,category_name,stock_quantity\`\n\n` +
-    `• Existing SKUs will be *updated*\n` +
-    `• New SKUs will be *created*\n` +
-    `• You'll see a *preview* before committing\n` +
-    `• All bulk ops can be *reverted*`;
+    `📥 *Bulk Operations*\n\n` +
+    `Import products from a CSV or TXT file, or paste data directly.\n\n` +
+    `*Supported formats:*\n` +
+    `• \`name,price,category\` (minimal)\n` +
+    `• \`sku,name,desc,price,category,stock\` (full)\n` +
+    `• Auto-detects headers & delimiters\n` +
+    `• Accepts .csv, .txt, .tsv files`;
 
-  const ops = await productManager.getBulkOperations(5);
   const buttons = [
-    [{ text: '📥 Send CSV File to Import', callback_data: 'pm_bulk_import_start' }],
+    [{ text: '📤 Send CSV/TXT File', callback_data: 'pm_bulk_import_start' }],
+    [{ text: '📋 Paste CSV Text', callback_data: 'pm_bulk_paste_start' }],
+    [{ text: '📂 Import to Specific Category', callback_data: 'pm_bulk_pick_cat' }],
+    [{ text: '📜 Bulk Op History', callback_data: 'pm_bulk_history' }],
+    [{ text: '🔙 Main Menu', callback_data: 'pm_main' }]
   ];
 
-  if (ops.length > 0) {
-    buttons.push([{ text: '📋 Past Operations', callback_data: 'pm_bulk_history' }]);
-  }
-
-  buttons.push([{ text: '🔙 Back', callback_data: 'pm_main' }]);
   return send(bot, chatId, text, buttons, messageId);
 }
 
-async function showBulkHistory(bot, chatId, messageId) {
+// ═══════════════════════════════════════════════════════════════════════
+//  BULK HISTORY
+// ═══════════════════════════════════════════════════════════════════════
+
+async function showBulkHistory(bot, chatId, messageId = null) {
   const ops = await productManager.getBulkOperations(10);
 
   if (ops.length === 0) {
-    return send(bot, chatId, '📭 No bulk operations yet.', [[{ text: '🔙 Back', callback_data: 'pm_bulk_menu' }]], messageId);
+    return send(bot, chatId, '📜 *Bulk Operation History*\n\n_No operations yet._', [[{ text: '🔙 Bulk Menu', callback_data: 'pm_bulk_menu' }]], messageId);
   }
 
-  let text = `📋 *Bulk Operation History*\n\n`;
+  let text = `📜 *Bulk Operation History*\n\n`;
   const buttons = [];
+
   for (const op of ops) {
-    const date = new Date(op.created_at).toLocaleDateString();
-    const statusEmoji = op.status === 'committed' ? '✅' : op.status === 'reverted' ? '↩️' : '⏳';
-    text += `${statusEmoji} \`${op.batch_id.substring(0, 15)}\` — ${op.total_items} items — ${date}\n`;
+    const icon = op.status === 'committed' ? '✅' : op.status === 'reverted' ? '♻️' : '⏳';
+    const type = op.type === 'nuke' ? '💣 Nuke' : '📥 Import';
+    text += `${icon} ${type} — ${op.total_items} items (${op.status})\n`;
+    text += `  📅 ${op.created_at?.slice(0, 16) || '?'}\n\n`;
 
     if (op.status === 'committed') {
-      buttons.push([{
-        text: `↩️ Revert: ${op.total_items} items (${date})`,
-        callback_data: `pm_bulk_revert_${op.batch_id}`
-      }]);
+      buttons.push([{ text: `♻️ Revert: ${op.type} (${op.total_items})`, callback_data: `pm_bulk_revert_${op.batch_id}` }]);
     }
   }
 
-  buttons.push([{ text: '🔙 Back', callback_data: 'pm_bulk_menu' }]);
+  buttons.push([{ text: '🔙 Bulk Menu', callback_data: 'pm_bulk_menu' }]);
   return send(bot, chatId, text, buttons, messageId);
 }
 
@@ -395,99 +399,94 @@ async function showBulkHistory(bot, chatId, messageId) {
 //  EXPORT MENU
 // ═══════════════════════════════════════════════════════════════════════
 
-async function showExportMenu(bot, chatId, messageId) {
-  const tree = await productManager.getCategoryTree();
-  const roots = tree.filter(c => c.parent_id === null);
+async function showExportMenu(bot, chatId, messageId = null) {
+  const roots = await productManager.getRootCategories();
 
-  const buttons = [
-    [{ text: '📥 Export ALL Products', callback_data: 'pm_export_all' }]
-  ];
-
-  for (const root of roots) {
-    buttons.push([{
-      text: `📥 ${root.name} (${root.productCount})`,
-      callback_data: `pm_export_cat_${root.id}`
-    }]);
+  const buttons = [[{ text: '📤 Export All Products', callback_data: 'pm_export_all' }]];
+  for (const cat of roots) {
+    buttons.push([{ text: `📤 ${cat.name}`, callback_data: `pm_export_cat_${cat.id}` }]);
   }
+  buttons.push([{ text: '🔙 Main Menu', callback_data: 'pm_main' }]);
 
-  buttons.push([{ text: '🔙 Back', callback_data: 'pm_main' }]);
-  return send(bot, chatId, `📥 *Export Products*\n\nSelect what to export (CSV format):`, buttons, messageId);
+  return send(bot, chatId, `📤 *Export Products*\n\nChoose what to export as CSV:`, buttons, messageId);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
 //  HISTORY MENU
 // ═══════════════════════════════════════════════════════════════════════
 
-async function showHistoryMenu(bot, chatId, page, messageId) {
-  const limit = 10;
-  const entries = await productManager.getRecentHistory(limit * page);
-  const pageEntries = entries.slice((page - 1) * limit, page * limit);
+async function showHistoryMenu(bot, chatId, page = 1, messageId = null) {
+  const entries = await productManager.getRecentHistory(50);
+  const pageSize = 10;
+  const totalPages = Math.max(Math.ceil(entries.length / pageSize), 1);
+  const safePage = Math.min(Math.max(page, 1), totalPages);
+  const slice = entries.slice((safePage - 1) * pageSize, safePage * pageSize);
 
-  if (pageEntries.length === 0) {
-    return send(bot, chatId, '📭 No history entries yet.', [[{ text: '🔙 Back', callback_data: 'pm_main' }]], messageId);
-  }
-
-  let text = `🕰️ *Change History* — Page ${page}\n\n`;
+  let text = `📜 *Change History*\n\n`;
   const buttons = [];
 
-  for (const e of pageEntries) {
-    const date = new Date(e.changed_at).toLocaleDateString();
-    const actionEmoji = { create: '🆕', update: '✏️', delete: '🗑️', restore: '♻️', revert: '↩️', bulk_import: '📤' }[e.action] || '❓';
-    const newData = e.new_data ? JSON.parse(e.new_data) : {};
-    const name = newData.name || `${e.entity_type} #${e.entity_id}`;
+  if (slice.length === 0) {
+    text += `_No history entries._`;
+  }
 
-    text += `${actionEmoji} ${e.action.toUpperCase()} ${e.entity_type}: *${name.substring(0, 30)}* (${date})\n`;
+  for (const e of slice) {
+    const icon = { create: '🆕', update: '✏️', delete: '🗑️', restore: '♻️', revert: '↩️' }[e.action] || '❓';
+    const reverted = e.reverted ? ' _(reverted)_' : '';
+    text += `${icon} ${e.entity_type} #${e.entity_id} — ${e.action}${reverted}\n`;
+    text += `  📅 ${e.changed_at?.slice(0, 16) || '?'}\n`;
 
-    if (!e.reverted && ['create', 'update', 'delete'].includes(e.action)) {
-      buttons.push([{
-        text: `↩️ Undo: ${e.action} "${name.substring(0, 20)}"`,
-        callback_data: `pm_undo_${e.id}`
-      }]);
+    if (!e.reverted && (e.action === 'create' || e.action === 'update' || e.action === 'delete')) {
+      buttons.push([{ text: `↩️ Undo: ${e.entity_type} #${e.entity_id} ${e.action}`, callback_data: `pm_undo_${e.id}` }]);
     }
   }
 
-  const navRow = [];
-  if (page > 1) navRow.push({ text: '⬅️ Prev', callback_data: `pm_history_${page - 1}` });
-  navRow.push({ text: `Page ${page}`, callback_data: 'pm_noop' });
-  if (pageEntries.length === limit) navRow.push({ text: 'Next ➡️', callback_data: `pm_history_${page + 1}` });
-  buttons.push(navRow);
-  buttons.push([{ text: '🔙 Back', callback_data: 'pm_main' }]);
+  if (totalPages > 1) {
+    const pag = [];
+    if (safePage > 1) pag.push({ text: '◀️', callback_data: `pm_history_${safePage - 1}` });
+    pag.push({ text: `${safePage}/${totalPages}`, callback_data: 'pm_noop' });
+    if (safePage < totalPages) pag.push({ text: '▶️', callback_data: `pm_history_${safePage + 1}` });
+    buttons.push(pag);
+  }
 
+  buttons.push([{ text: '🔙 Main Menu', callback_data: 'pm_main' }]);
   return send(bot, chatId, text, buttons, messageId);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  CATEGORY PICKERS — shared helper for selecting a category
+//  CATEGORY PICKER (for add-product, move, bulk import)
+//  Only shows LEAF categories (no children) to prevent misplacement.
 // ═══════════════════════════════════════════════════════════════════════
 
-async function showCategoryPicker(bot, chatId, messageId, callbackPrefix, title, includeSubcats = true) {
+async function showCategoryPicker(bot, chatId, messageId, callbackPrefix, title, backCallback = 'pm_prod_menu') {
   const tree = await productManager.getCategoryTree();
-  const roots = tree.filter(c => c.parent_id === null);
 
-  if (roots.length === 0) {
-    return send(bot, chatId, '📭 No categories. Create one first.', [[{ text: '🔙 Back', callback_data: 'pm_cat_menu' }]], messageId);
+  // Separate leaf vs parent categories
+  const parentIds = new Set(tree.filter(c => c.parent_id !== null).map(c => c.parent_id));
+  const leaves = tree.filter(c => !parentIds.has(c.id));
+
+  if (leaves.length === 0) {
+    return send(bot, chatId, `${title}\n\n_No leaf categories available. Create subcategories first._`, [[{ text: '🔙 Back', callback_data: backCallback }]], messageId);
   }
 
   const buttons = [];
-  for (const root of roots) {
-    buttons.push([{
-      text: `📁 ${root.name}`,
-      callback_data: `${callbackPrefix}${root.id}`
-    }]);
-    if (includeSubcats) {
-      const subs = tree.filter(c => c.parent_id === root.id);
-      if (subs.length > 0) {
-        const subRow = subs.slice(0, 3).map(s => ({
-          text: `└ ${s.name}`,
-          callback_data: `${callbackPrefix}${s.id}`
-        }));
-        buttons.push(subRow);
-      }
+  for (const leaf of leaves) {
+    // Build breadcrumb: find parent chain
+    const breadcrumb = [];
+    let current = leaf;
+    while (current.parent_id) {
+      const parent = tree.find(c => c.id === current.parent_id);
+      if (parent) {
+        breadcrumb.unshift(parent.name);
+        current = parent;
+      } else break;
     }
-  }
-  buttons.push([{ text: '🔙 Back', callback_data: 'pm_cat_menu' }]);
 
-  return send(bot, chatId, `${title}`, buttons, messageId);
+    const path = breadcrumb.length > 0 ? `${breadcrumb.join(' › ')} › ${leaf.name}` : leaf.name;
+    buttons.push([{ text: `📂 ${path}`, callback_data: `${callbackPrefix}${leaf.id}` }]);
+  }
+
+  buttons.push([{ text: '🔙 Back', callback_data: backCallback }]);
+  return send(bot, chatId, title + `\n\n_Only leaf categories (no subcategories) are shown._`, buttons, messageId);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -495,173 +494,273 @@ async function showCategoryPicker(bot, chatId, messageId, callbackPrefix, title,
 // ═══════════════════════════════════════════════════════════════════════
 
 export async function handleProductManagerCallback(bot, query) {
-  const chatId = query.message.chat.id;
-  const messageId = query.message.message_id;
-  const userId = query.from.id;
   const data = query.data;
+  const chatId = query.message.chat.id;
+  const userId = query.from.id;
+  const messageId = query.message.message_id;
 
   // Admin check
   const isAdmin = await adminManager.isAdmin(userId);
   if (!isAdmin) {
-    return bot.answerCallbackQuery(query.id, { text: '⛔ Unauthorized', show_alert: true });
+    return bot.answerCallbackQuery(query.id, { text: '🚫 Admin only', show_alert: true });
   }
 
-  try {
-    await bot.answerCallbackQuery(query.id);
-  } catch { /* ignore */ }
-
-  // ── Main ──
-  if (data === 'pm_main') return showMainMenu(bot, chatId, userId, messageId);
+  // ── Utility ──
+  if (data === 'pm_noop') return bot.answerCallbackQuery(query.id);
   if (data === 'pm_close') {
     clearState(userId);
     try { await bot.deleteMessage(chatId, messageId); } catch { /* ignore */ }
     return;
   }
-  if (data === 'pm_noop') return;
 
-  // ── Category menu ──
+  // ── Navigation ──
+  if (data === 'pm_main') { clearState(userId); return showMainMenu(bot, chatId, userId, messageId); }
   if (data === 'pm_cat_menu') return showCategoryMenu(bot, chatId, messageId);
+  if (data === 'pm_prod_menu') return showProductMenu(bot, chatId, messageId);
+  if (data === 'pm_prod_browse') return showBrowseCategories(bot, chatId, messageId);
 
-  // Add root category
+  // ── Category view ──
+  if (data.startsWith('pm_cat_view_')) {
+    const catId = parseInt(data.replace('pm_cat_view_', ''), 10);
+    const cat = await productManager.getCategory(catId);
+    if (!cat) return send(bot, chatId, '❌ Category not found.', [[{ text: '🔙 Back', callback_data: 'pm_cat_menu' }]], messageId);
+
+    const subs = await productManager.getSubcategories(catId);
+    const isLeaf = await productManager.isLeafCategory(catId);
+    const products = isLeaf
+      ? (await productManager.searchProducts({ categoryId: catId, status: 'active', pageSize: 5 }))
+      : { total: 0 };
+
+    let text = `📂 *${cat.name}*\n\n`;
+    if (subs.length > 0) {
+      text += `📁 *Subcategories:*\n`;
+      for (const s of subs) text += `  • ${s.name} (${s.productCount} items)\n`;
+      text += '\n';
+    }
+    if (isLeaf) {
+      text += `🛍️ Products: *${products.total}*\n`;
+    } else {
+      text += `⚠️ _This is a parent category — products can only be added to leaf categories._\n`;
+    }
+
+    const buttons = [];
+    for (const s of subs) {
+      buttons.push([{ text: `📂 ${s.name}`, callback_data: `pm_cat_view_${s.id}` }]);
+    }
+    buttons.push([{ text: '➕ Add Subcategory', callback_data: `pm_cat_add_sub_${catId}` }]);
+    buttons.push([
+      { text: '✏️ Rename', callback_data: `pm_cat_rename_${catId}` },
+      { text: '🗑️ Delete', callback_data: `pm_cat_del_confirm_${catId}` }
+    ]);
+    if (isLeaf) {
+      buttons.push([{ text: '🛍️ View Products', callback_data: `pm_prod_cat_${catId}` }]);
+    }
+    if (cat.parent_id) {
+      buttons.push([{ text: '🔙 Back', callback_data: `pm_cat_view_${cat.parent_id}` }]);
+    } else {
+      buttons.push([{ text: '🔙 Categories', callback_data: 'pm_cat_menu' }]);
+    }
+
+    return send(bot, chatId, text, buttons, messageId);
+  }
+
+  // ── Category: add root ──
   if (data === 'pm_cat_add_root') {
     setState(userId, { step: 'cat_add_root' });
-    return send(bot, chatId, '📁 *Add Root Category*\n\nType the new category name:', [[{ text: '🔙 Cancel', callback_data: 'pm_cat_menu' }]], messageId);
-  }
-
-  // Add subcategory — pick parent
-  if (data === 'pm_cat_add_sub_pick') {
-    return showCategoryPicker(bot, chatId, messageId, 'pm_cat_add_sub_', '📁 *Add Subcategory*\n\nSelect parent category:', false);
-  }
-
-  // Add subcategory — parent selected
-  if (data.startsWith('pm_cat_add_sub_')) {
-    const parentId = parseInt(data.replace('pm_cat_add_sub_', ''), 10);
-    setState(userId, { step: 'cat_add_sub', parentId });
-    const parent = await productManager.getCategory(parentId);
-    return send(bot, chatId, `📁 *Add Subcategory under "${parent?.name}"*\n\nType the subcategory name:`,
+    return send(bot, chatId, `📂 *Add Root Category*\n\nType the category name:`,
       [[{ text: '🔙 Cancel', callback_data: 'pm_cat_menu' }]], messageId);
   }
 
-  // Rename — pick category
-  if (data === 'pm_cat_rename_pick') {
-    return showCategoryPicker(bot, chatId, messageId, 'pm_cat_rename_', '✏️ *Rename Category*\n\nSelect category to rename:');
+  // ── Category: add subcategory ──
+  if (data.startsWith('pm_cat_add_sub_')) {
+    const parentId = parseInt(data.replace('pm_cat_add_sub_', ''), 10);
+    const parent = await productManager.getCategory(parentId);
+    setState(userId, { step: 'cat_add_sub', parentId });
+    return send(bot, chatId, `📂 *Add Subcategory to "${parent?.name}"*\n\nType the subcategory name:`,
+      [[{ text: '🔙 Cancel', callback_data: `pm_cat_view_${parentId}` }]], messageId);
   }
 
-  // Rename — category selected
+  // ── Category: rename ──
   if (data.startsWith('pm_cat_rename_')) {
     const catId = parseInt(data.replace('pm_cat_rename_', ''), 10);
     const cat = await productManager.getCategory(catId);
     setState(userId, { step: 'cat_rename', catId });
     return send(bot, chatId, `✏️ *Rename "${cat?.name}"*\n\nType the new name:`,
-      [[{ text: '🔙 Cancel', callback_data: 'pm_cat_menu' }]], messageId);
+      [[{ text: '🔙 Cancel', callback_data: `pm_cat_view_${catId}` }]], messageId);
   }
 
-  // Delete — pick category
-  if (data === 'pm_cat_del_pick') {
-    return showCategoryPicker(bot, chatId, messageId, 'pm_cat_del_', '🗑️ *Delete Category*\n\nSelect category to delete:');
-  }
-
-  // Delete — category selected → show impact
-  if (data.startsWith('pm_cat_del_') && !data.includes('confirm')) {
-    const catId = parseInt(data.replace('pm_cat_del_', ''), 10);
+  // ── Category: delete confirmation ──
+  if (data.startsWith('pm_cat_del_confirm_')) {
+    const catId = parseInt(data.replace('pm_cat_del_confirm_', ''), 10);
     const impact = await productManager.getCategoryDeleteImpact(catId);
     if (!impact) return send(bot, chatId, '❌ Category not found.', [[{ text: '🔙 Back', callback_data: 'pm_cat_menu' }]], messageId);
 
     const text =
       `⚠️ *Delete "${impact.category.name}"?*\n\n` +
       `This will archive:\n` +
-      `• *${impact.subcatCount}* subcategories\n` +
-      `• *${impact.productCount}* direct products\n` +
-      `• *${impact.allDescendantProducts}* descendant products\n\n` +
-      `_All items will be soft-deleted and can be restored from History._`;
+      `• ${impact.subcatCount} subcategories\n` +
+      `• ${impact.productCount} direct products\n` +
+      `• ${impact.allDescendantProducts} descendant products\n\n` +
+      `_You can revert this from Bulk History._`;
 
     return send(bot, chatId, text, [
       [
-        { text: '✅ Yes, Delete', callback_data: `pm_cat_del_confirm_${catId}` },
-        { text: '❌ Cancel', callback_data: 'pm_cat_menu' }
+        { text: '✅ Yes, Delete', callback_data: `pm_cat_del_exec_${catId}` },
+        { text: '❌ Cancel', callback_data: `pm_cat_view_${catId}` }
       ]
     ], messageId);
   }
 
-  // Delete — confirmed
-  if (data.startsWith('pm_cat_del_confirm_')) {
-    const catId = parseInt(data.replace('pm_cat_del_confirm_', ''), 10);
+  // ── Category: execute delete ──
+  if (data.startsWith('pm_cat_del_exec_')) {
+    const catId = parseInt(data.replace('pm_cat_del_exec_', ''), 10);
     const res = await productManager.deleteCategory(catId, userId);
     if (!res.ok) return send(bot, chatId, `❌ ${res.error}`, [[{ text: '🔙 Back', callback_data: 'pm_cat_menu' }]], messageId);
-    return send(bot, chatId, `✅ Category deleted. Batch: \`${res.batchId}\`\n\nYou can revert this from History.`,
-      [[{ text: '🔙 Back', callback_data: 'pm_cat_menu' }]], messageId);
+    return send(bot, chatId, `✅ Category deleted (archived). Batch: \`${res.batchId}\``,
+      [[{ text: '🔙 Categories', callback_data: 'pm_cat_menu' }]], messageId);
   }
 
-  // ── Product menu ──
-  if (data === 'pm_prod_menu') return showProductMenu(bot, chatId, messageId);
-  if (data === 'pm_prod_browse') return showProductBrowseCategories(bot, chatId, messageId);
+  // ── Product listing ──
+  if (data.startsWith('pm_prod_cat_')) {
+    const catId = parseInt(data.replace('pm_prod_cat_', ''), 10);
+    return showProductList(bot, chatId, catId, 1, messageId);
+  }
 
-  // Product list
   if (data.startsWith('pm_prod_list_')) {
     const parts = data.replace('pm_prod_list_', '').split('_');
-    return showProductList(bot, chatId, parseInt(parts[0], 10), parseInt(parts[1], 10), messageId);
+    const catId = parseInt(parts[0], 10);
+    const page = parseInt(parts[1], 10);
+    return showProductList(bot, chatId, catId, page, messageId);
   }
 
-  // Product view
+  // ── Product view ──
   if (data.startsWith('pm_prod_view_')) {
     const prodId = parseInt(data.replace('pm_prod_view_', ''), 10);
     return showProductView(bot, chatId, prodId, messageId);
   }
 
-  // Product delete
-  if (data.startsWith('pm_prod_del_') && !data.includes('confirm')) {
+  // ── Product delete ──
+  if (data.startsWith('pm_prod_del_')) {
     const prodId = parseInt(data.replace('pm_prod_del_', ''), 10);
-    const p = await productManager.getProduct(prodId);
-    return send(bot, chatId,
-      `⚠️ *Delete "${p?.name}"?*\n\nThis will soft-delete the product. It can be restored from archived items.`,
-      [
-        [
-          { text: '✅ Yes, Delete', callback_data: `pm_prod_del_confirm_${prodId}` },
-          { text: '❌ Cancel', callback_data: `pm_prod_view_${prodId}` }
-        ]
-      ], messageId);
-  }
-
-  // Product delete confirmed
-  if (data.startsWith('pm_prod_del_confirm_')) {
-    const prodId = parseInt(data.replace('pm_prod_del_confirm_', ''), 10);
     const res = await productManager.deleteProduct(prodId, userId);
     if (!res.ok) return send(bot, chatId, `❌ ${res.error}`, [[{ text: '🔙 Back', callback_data: 'pm_prod_menu' }]], messageId);
     return send(bot, chatId, `✅ Product deleted. You can restore it from Archived Items.`,
-      [[{ text: '🔙 Back', callback_data: 'pm_prod_menu' }]], messageId);
+      [[{ text: '🗄️ Archived', callback_data: 'pm_prod_archived_1' }, { text: '🔙 Products', callback_data: 'pm_prod_menu' }]], messageId);
   }
 
-  // Product restore
+  // ── Product restore ──
   if (data.startsWith('pm_prod_restore_')) {
     const prodId = parseInt(data.replace('pm_prod_restore_', ''), 10);
     const res = await productManager.restoreProduct(prodId, userId);
     if (!res.ok) return send(bot, chatId, `❌ ${res.error}`, [[{ text: '🔙 Back', callback_data: 'pm_prod_menu' }]], messageId);
-    return send(bot, chatId, `✅ Product restored!`, [[{ text: '🔙 Back', callback_data: 'pm_prod_menu' }]], messageId);
+    return send(bot, chatId, `✅ Product restored!`, [[{ text: '👁️ View', callback_data: `pm_prod_view_${prodId}` }, { text: '🔙 Products', callback_data: 'pm_prod_menu' }]], messageId);
   }
 
-  // Archived list
+  // ── Archived list ──
   if (data.startsWith('pm_prod_archived_')) {
     const page = parseInt(data.replace('pm_prod_archived_', ''), 10);
     return showArchivedProducts(bot, chatId, page, messageId);
   }
 
-  // ── Add product wizard ──
+  // ═══════════════════════════════════════════════════════════════════
+  //  NUKE ALL PRODUCTS
+  // ═══════════════════════════════════════════════════════════════════
+
+  if (data === 'pm_nuke_start') {
+    const stats = await productManager.getStats();
+    if (stats.activeProducts === 0) {
+      return send(bot, chatId, '💣 _No active products to nuke._', [[{ text: '🔙 Products', callback_data: 'pm_prod_menu' }]], messageId);
+    }
+    return send(bot, chatId,
+      `💣 *NUKE ALL PRODUCTS*\n\n` +
+      `⚠️ This will archive ALL *${stats.activeProducts}* active products.\n\n` +
+      `This action can be reverted from Bulk History.\n\n` +
+      `*Are you absolutely sure?*`,
+      [
+        [{ text: '💣 YES, NUKE EVERYTHING', callback_data: 'pm_nuke_confirm' }],
+        [{ text: '❌ Cancel', callback_data: 'pm_prod_menu' }]
+      ], messageId);
+  }
+
+  if (data === 'pm_nuke_confirm') {
+    const stats = await productManager.getStats();
+    return send(bot, chatId,
+      `💣🔴 *FINAL CONFIRMATION*\n\n` +
+      `You are about to archive *${stats.activeProducts}* products.\n\n` +
+      `Type the button below to proceed:`,
+      [
+        [{ text: `☠️ NUKE ${stats.activeProducts} PRODUCTS NOW`, callback_data: 'pm_nuke_exec' }],
+        [{ text: '❌ Cancel — Take Me Back', callback_data: 'pm_prod_menu' }]
+      ], messageId);
+  }
+
+  if (data === 'pm_nuke_exec') {
+    const statusMsg = await bot.sendMessage(chatId, '💣 Nuking all products...');
+    try {
+      const res = await productManager.nukeAllProducts(userId);
+      if (!res.ok) {
+        return bot.editMessageText(`❌ ${res.error}`, { chat_id: chatId, message_id: statusMsg.message_id });
+      }
+      return bot.editMessageText(
+        `💣 *NUKE COMPLETE*\n\n☠️ *${res.count}* products archived.\n🔖 Batch: \`${res.batchId}\`\n\n_You can revert this from Bulk History._`,
+        {
+          chat_id: chatId, message_id: statusMsg.message_id,
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [
+            [{ text: '♻️ Undo Nuke', callback_data: `pm_bulk_revert_${res.batchId}` }],
+            [{ text: '🔙 Main Menu', callback_data: 'pm_main' }]
+          ]}
+        }
+      );
+    } catch (err) {
+      logger.error('PRODUCT', 'Nuke error', err);
+      return bot.editMessageText(`❌ Nuke failed: ${err.message}`, { chat_id: chatId, message_id: statusMsg.message_id });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  ADD PRODUCT WIZARD
+  // ═══════════════════════════════════════════════════════════════════
 
   // Step 1: pick category
   if (data === 'pm_prod_add_cat') {
-    return showCategoryPicker(bot, chatId, messageId, 'pm_prod_add_in_', '🛍️ *Add Product*\n\nSelect category:');
+    return showCategoryPicker(bot, chatId, messageId, 'pm_prod_add_in_', '🛍️ *Add Product*\n\nSelect a category:', 'pm_prod_menu');
   }
 
-  // Step 2: category selected → ask name
+  // Step 2: category selected → show options (single or bulk)
   if (data.startsWith('pm_prod_add_in_')) {
     const catId = parseInt(data.replace('pm_prod_add_in_', ''), 10);
+
+    // Verify it's a leaf category
+    const isLeaf = await productManager.isLeafCategory(catId);
+    if (!isLeaf) {
+      return send(bot, chatId,
+        `⚠️ *This category has subcategories.*\n\nProducts can only be added to leaf categories (no children).`,
+        [[{ text: '🔙 Pick Another', callback_data: 'pm_prod_add_cat' }]], messageId);
+    }
+
+    const cat = await productManager.getCategory(catId);
+    return send(bot, chatId,
+      `🛍️ *Add to "${cat?.name}"*\n\nChoose an option:`,
+      [
+        [{ text: '✏️ Add Single Product', callback_data: `pm_prod_add_single_${catId}` }],
+        [{ text: '📥 Bulk Import to This Category', callback_data: `pm_bulk_to_cat_${catId}` }],
+        [{ text: '🔙 Pick Another Category', callback_data: 'pm_prod_add_cat' }]
+      ], messageId);
+  }
+
+  // Step 2b: single product — ask name
+  if (data.startsWith('pm_prod_add_single_')) {
+    const catId = parseInt(data.replace('pm_prod_add_single_', ''), 10);
     const cat = await productManager.getCategory(catId);
     setState(userId, { step: 'prod_add_name', catId, catName: cat?.name });
     return send(bot, chatId, `🛍️ *Add Product to "${cat?.name}"*\n\nType the product *name*:`,
       [[{ text: '🔙 Cancel', callback_data: 'pm_prod_menu' }]], messageId);
   }
 
-  // ── Edit product fields ──
+  // ═══════════════════════════════════════════════════════════════════
+  //  EDIT PRODUCT FIELDS
+  // ═══════════════════════════════════════════════════════════════════
 
   if (data.startsWith('pm_edit_name_')) {
     const prodId = parseInt(data.replace('pm_edit_name_', ''), 10);
@@ -696,7 +795,7 @@ export async function handleProductManagerCallback(bot, query) {
   if (data.startsWith('pm_edit_cat_')) {
     const prodId = parseInt(data.replace('pm_edit_cat_', ''), 10);
     setState(userId, { step: 'edit_cat', prodId });
-    return showCategoryPicker(bot, chatId, messageId, `pm_edit_cat_sel_${prodId}_`, '📂 *Move Product*\n\nSelect new category:');
+    return showCategoryPicker(bot, chatId, messageId, `pm_edit_cat_sel_${prodId}_`, '📂 *Move Product*\n\nSelect new category:', `pm_prod_view_${prodId}`);
   }
 
   // Move category — selection made
@@ -710,7 +809,10 @@ export async function handleProductManagerCallback(bot, query) {
     return showProductView(bot, chatId, prodId, messageId);
   }
 
-  // ── Search ──
+  // ═══════════════════════════════════════════════════════════════════
+  //  SEARCH
+  // ═══════════════════════════════════════════════════════════════════
+
   if (data === 'pm_search_start') {
     setState(userId, { step: 'search' });
     return send(bot, chatId, `🔍 *Search Products*\n\nType a product name, SKU, or keyword:`,
@@ -726,16 +828,65 @@ export async function handleProductManagerCallback(bot, query) {
     return showMainMenu(bot, chatId, userId, messageId);
   }
 
-  // ── Bulk ops ──
+  // ═══════════════════════════════════════════════════════════════════
+  //  BULK OPS
+  // ═══════════════════════════════════════════════════════════════════
+
   if (data === 'pm_bulk_menu') return showBulkMenu(bot, chatId, messageId);
   if (data === 'pm_bulk_history') return showBulkHistory(bot, chatId, messageId);
 
+  // General bulk import (file) — any category
   if (data === 'pm_bulk_import_start') {
     setState(userId, { step: 'bulk_import_file' });
     return send(bot, chatId,
-      `📥 *Bulk Import*\n\nSend me a CSV file with this format:\n\n` +
-      `\`sku,name,description,price,category_name,stock_quantity\`\n\n` +
-      `Or paste the CSV text directly as a message.`,
+      `📤 *Bulk Import — Send File*\n\n` +
+      `Send me a CSV or TXT file with your products.\n\n` +
+      `*Supported column names:*\n` +
+      `\`name\`, \`price\`, \`category\` (required)\n` +
+      `\`sku\`, \`description\`, \`stock\` (optional)\n\n` +
+      `*Example:*\n` +
+      `\`\`\`\nname,price,category\nProduct A,29.99,USA CVV\nProduct B,49.99,Local Bank\n\`\`\`\n\n` +
+      `📎 _Send the file now, or press Cancel._`,
+      [[{ text: '🔙 Cancel', callback_data: 'pm_bulk_menu' }]], messageId);
+  }
+
+  // General bulk import (paste) — any category
+  if (data === 'pm_bulk_paste_start') {
+    setState(userId, { step: 'bulk_import_file' });
+    return send(bot, chatId,
+      `📋 *Bulk Import — Paste Data*\n\n` +
+      `Paste your CSV data as a text message.\n\n` +
+      `*Example:*\n` +
+      `\`\`\`\nname,price,category\nProduct A,29.99,USA CVV\nProduct B,49.99,Local Bank\n\`\`\`\n\n` +
+      `✏️ _Paste your data now, or press Cancel._`,
+      [[{ text: '🔙 Cancel', callback_data: 'pm_bulk_menu' }]], messageId);
+  }
+
+  // Bulk import → pick category first
+  if (data === 'pm_bulk_pick_cat') {
+    return showCategoryPicker(bot, chatId, messageId, 'pm_bulk_to_cat_', '📥 *Bulk Import*\n\nSelect target category:', 'pm_bulk_menu');
+  }
+
+  // Bulk import to specific category
+  if (data.startsWith('pm_bulk_to_cat_')) {
+    const catId = parseInt(data.replace('pm_bulk_to_cat_', ''), 10);
+
+    // Verify leaf
+    const isLeaf = await productManager.isLeafCategory(catId);
+    if (!isLeaf) {
+      return send(bot, chatId,
+        `⚠️ *This category has subcategories.*\n\nBulk import only works with leaf categories.`,
+        [[{ text: '🔙 Pick Another', callback_data: 'pm_bulk_pick_cat' }]], messageId);
+    }
+
+    const cat = await productManager.getCategory(catId);
+    setState(userId, { step: 'bulk_import_file', forceCategoryId: catId, catName: cat?.name });
+    return send(bot, chatId,
+      `📥 *Bulk Import to "${cat?.name}"*\n\n` +
+      `Send a CSV/TXT file or paste text.\n\n` +
+      `Since a category is pre-selected, you only need:\n` +
+      `\`name,price\` (minimal) or \`name,price,description,stock\`\n\n` +
+      `📎 _Send file or paste data now._`,
       [[{ text: '🔙 Cancel', callback_data: 'pm_bulk_menu' }]], messageId);
   }
 
@@ -744,42 +895,47 @@ export async function handleProductManagerCallback(bot, query) {
     const batchId = data.replace('pm_bulk_commit_', '');
     const statusMsg = await bot.sendMessage(chatId, '⏳ Committing bulk import...');
 
-    const res = await productManager.commitBulkOperation(batchId, userId, async (done, total, success, errors) => {
-      try {
-        await bot.editMessageText(
-          `⏳ *Bulk Import Progress*\n\nProcessed: ${done}/${total}\n✅ Success: ${success}\n❌ Errors: ${errors}`,
-          { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'Markdown' }
-        );
-      } catch { /* ignore */ }
-    });
+    try {
+      const res = await productManager.commitBulkOperation(batchId, userId, async (done, total, success, errors) => {
+        try {
+          await bot.editMessageText(
+            `⏳ *Bulk Import Progress*\n\nProcessed: ${done}/${total}\n✅ Success: ${success}\n❌ Errors: ${errors}`,
+            { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'Markdown' }
+          );
+        } catch { /* ignore rate limits */ }
+      });
 
-    if (!res.ok) {
-      return bot.editMessageText(`❌ ${res.error}`, { chat_id: chatId, message_id: statusMsg.message_id });
+      if (!res.ok) {
+        return bot.editMessageText(`❌ ${res.error}`, { chat_id: chatId, message_id: statusMsg.message_id });
+      }
+
+      let resultText = `✅ *Bulk Import Complete*\n\n✅ Success: ${res.successCount}\n❌ Errors: ${res.errorCount}`;
+      if (res.errors.length > 0) {
+        resultText += `\n\n*Errors:*\n${res.errors.slice(0, 10).join('\n')}`;
+      }
+
+      return bot.editMessageText(resultText, {
+        chat_id: chatId, message_id: statusMsg.message_id,
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: '🔙 Main Menu', callback_data: 'pm_main' }]] }
+      });
+    } catch (err) {
+      logger.error('PRODUCT', 'Bulk commit error', err);
+      return bot.editMessageText(`❌ Bulk commit failed: ${err.message}`, { chat_id: chatId, message_id: statusMsg.message_id });
     }
-
-    let resultText = `✅ *Bulk Import Complete*\n\n✅ Success: ${res.successCount}\n❌ Errors: ${res.errorCount}`;
-    if (res.errors.length > 0) {
-      resultText += `\n\n*Errors:*\n${res.errors.slice(0, 10).join('\n')}`;
-    }
-
-    return bot.editMessageText(resultText, {
-      chat_id: chatId, message_id: statusMsg.message_id,
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: [[{ text: '🔙 Back', callback_data: 'pm_main' }]] }
-    });
   }
 
   // Bulk preview — cancel
   if (data.startsWith('pm_bulk_cancel_')) {
     clearState(userId);
-    return send(bot, chatId, '❌ Bulk import cancelled.', [[{ text: '🔙 Back', callback_data: 'pm_bulk_menu' }]], messageId);
+    return send(bot, chatId, '❌ Bulk import cancelled.', [[{ text: '🔙 Bulk Menu', callback_data: 'pm_bulk_menu' }]], messageId);
   }
 
-  // Bulk revert
+  // Bulk revert — ask confirmation
   if (data.startsWith('pm_bulk_revert_') && !data.includes('confirm')) {
     const batchId = data.replace('pm_bulk_revert_', '');
     return send(bot, chatId,
-      `⚠️ *Revert this bulk operation?*\n\nBatch: \`${batchId}\`\n\nAll changes from this import will be undone.`,
+      `⚠️ *Revert this bulk operation?*\n\nBatch: \`${batchId}\`\n\nAll changes from this operation will be undone.`,
       [
         [
           { text: '✅ Yes, Revert', callback_data: `pm_bulk_revert_confirm_${batchId}` },
@@ -788,35 +944,60 @@ export async function handleProductManagerCallback(bot, query) {
       ], messageId);
   }
 
+  // Bulk revert — execute
   if (data.startsWith('pm_bulk_revert_confirm_')) {
     const batchId = data.replace('pm_bulk_revert_confirm_', '');
-    const res = await productManager.revertBulkOperation(batchId, userId);
-    if (!res.ok) return send(bot, chatId, `❌ ${res.error}`, [[{ text: '🔙 Back', callback_data: 'pm_bulk_history' }]], messageId);
-    return send(bot, chatId, `✅ *Reverted!*\n\n♻️ ${res.revertedCount}/${res.total} items restored.`,
-      [[{ text: '🔙 Back', callback_data: 'pm_bulk_menu' }]], messageId);
+    const statusMsg = await bot.sendMessage(chatId, '♻️ Reverting...');
+    try {
+      const res = await productManager.revertBulkOperation(batchId, userId);
+      if (!res.ok) {
+        return bot.editMessageText(`❌ ${res.error}`, { chat_id: chatId, message_id: statusMsg.message_id });
+      }
+      return bot.editMessageText(
+        `✅ *Reverted!*\n\n♻️ ${res.revertedCount}/${res.total} items restored.`,
+        {
+          chat_id: chatId, message_id: statusMsg.message_id,
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '🔙 Bulk Menu', callback_data: 'pm_bulk_menu' }]] }
+        }
+      );
+    } catch (err) {
+      logger.error('PRODUCT', 'Bulk revert error', err);
+      return bot.editMessageText(`❌ Revert failed: ${err.message}`, { chat_id: chatId, message_id: statusMsg.message_id });
+    }
   }
 
-  // ── Export ──
+  // ═══════════════════════════════════════════════════════════════════
+  //  EXPORT
+  // ═══════════════════════════════════════════════════════════════════
+
   if (data === 'pm_export_menu') return showExportMenu(bot, chatId, messageId);
 
   if (data === 'pm_export_all' || data.startsWith('pm_export_cat_')) {
     const catId = data === 'pm_export_all' ? null : parseInt(data.replace('pm_export_cat_', ''), 10);
-    const csv = await productManager.exportProductsCSV(catId);
-    const buf = Buffer.from(csv, 'utf-8');
-    const fileName = catId ? `products_cat_${catId}.csv` : 'products_all.csv';
-
-    await bot.sendDocument(chatId, buf, { caption: `📥 Exported ${csv.split('\n').length - 1} products.` }, { filename: fileName, contentType: 'text/csv' });
+    try {
+      const csv = await productManager.exportProductsCSV(catId);
+      const buf = Buffer.from(csv, 'utf-8');
+      const fileName = catId ? `products_cat_${catId}.csv` : 'products_all.csv';
+      await bot.sendDocument(chatId, buf, { caption: `📤 Exported ${csv.split('\n').length - 1} products.` }, { filename: fileName, contentType: 'text/csv' });
+    } catch (err) {
+      logger.error('PRODUCT', 'Export error', err);
+      await bot.sendMessage(chatId, `❌ Export failed: ${err.message}`);
+    }
     return;
   }
 
-  // ── History ──
+  // ═══════════════════════════════════════════════════════════════════
+  //  HISTORY
+  // ═══════════════════════════════════════════════════════════════════
+
   if (data === 'pm_history_menu') return showHistoryMenu(bot, chatId, 1, messageId);
   if (data.startsWith('pm_history_')) {
     const page = parseInt(data.replace('pm_history_', ''), 10);
     return showHistoryMenu(bot, chatId, page, messageId);
   }
 
-  // Undo single change
+  // Undo single change — ask confirmation
   if (data.startsWith('pm_undo_') && !data.includes('confirm')) {
     const historyId = parseInt(data.replace('pm_undo_', ''), 10);
     return send(bot, chatId, `⚠️ *Undo this change?*\n\nHistory ID: \`${historyId}\``,
@@ -832,7 +1013,7 @@ export async function handleProductManagerCallback(bot, query) {
     const historyId = parseInt(data.replace('pm_undo_confirm_', ''), 10);
     const res = await productManager.revertChange(historyId, userId);
     if (!res.ok) return send(bot, chatId, `❌ ${res.error}`, [[{ text: '🔙 Back', callback_data: 'pm_history_menu' }]], messageId);
-    return send(bot, chatId, `✅ Change reverted!`, [[{ text: '🔙 Back', callback_data: 'pm_history_menu' }]], messageId);
+    return send(bot, chatId, `✅ Change reverted!`, [[{ text: '🔙 History', callback_data: 'pm_history_menu' }]], messageId);
   }
 
   // Fallback
@@ -1030,14 +1211,14 @@ export async function handleProductManagerInput(bot, msg) {
 
   // ── Bulk import — text CSV pasted directly ──
   if (state.step === 'bulk_import_file' && text) {
-    return await processBulkCSV(bot, chatId, userId, text);
+    return await processBulkCSV(bot, chatId, userId, text, state.forceCategoryId || null);
   }
 
   return false;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  DOCUMENT HANDLER — for CSV file uploads
+//  DOCUMENT HANDLER — for CSV/TXT file uploads
 //  Returns true if consumed.
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -1051,76 +1232,129 @@ export async function handleProductManagerDocument(bot, msg) {
   if (!msg.document) return false;
 
   const doc = msg.document;
-  const name = doc.file_name || '';
-  if (!name.endsWith('.csv') && !name.endsWith('.txt')) {
-    await bot.sendMessage(chatId, '❌ Please send a `.csv` or `.txt` file.', { parse_mode: 'Markdown' });
+  const name = (doc.file_name || '').toLowerCase();
+
+  // Accept CSV, TXT, and common text-based extensions
+  const allowedExts = ['.csv', '.txt', '.tsv', '.text', '.dat'];
+  const hasAllowed = allowedExts.some(ext => name.endsWith(ext));
+  const isText = (doc.mime_type || '').startsWith('text/') || doc.mime_type === 'application/csv';
+
+  if (!hasAllowed && !isText) {
+    await bot.sendMessage(chatId,
+      '❌ Unsupported file type.\n\nPlease send a `.csv`, `.txt`, or `.tsv` file.\nOr paste the data as a text message.',
+      { parse_mode: 'Markdown' }
+    );
+    return true;
+  }
+
+  // Size check (max 5 MB)
+  if (doc.file_size > 5 * 1024 * 1024) {
+    await bot.sendMessage(chatId, '❌ File too large (max 5 MB). Split your data into smaller files.');
     return true;
   }
 
   try {
+    logger.info('PRODUCT', `Downloading bulk file: ${doc.file_name} (${doc.file_size} bytes) from user ${userId}`);
     const fileLink = await bot.getFileLink(doc.file_id);
+    logger.info('PRODUCT', `File link obtained: ${fileLink}`);
+
     const response = await fetch(fileLink);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
     const csvText = await response.text();
-    return await processBulkCSV(bot, chatId, userId, csvText);
+    logger.info('PRODUCT', `File downloaded: ${csvText.length} chars, ${csvText.split('\n').length} lines`);
+
+    return await processBulkCSV(bot, chatId, userId, csvText, state.forceCategoryId || null);
   } catch (err) {
-    logger.error('PRODUCT', 'Failed to download CSV file', err);
-    await bot.sendMessage(chatId, '❌ Failed to download the file. Please try again.');
+    logger.error('PRODUCT', 'Failed to download/process CSV file', err);
+    await bot.sendMessage(chatId,
+      `❌ Failed to process the file.\n\n*Error:* ${err.message}\n\nPlease try again or paste the data as text.`,
+      { parse_mode: 'Markdown' }
+    );
     return true;
   }
 }
 
-// ── Shared bulk CSV processor ──
+// ═══════════════════════════════════════════════════════════════════════
+//  Shared bulk CSV processor
+// ═══════════════════════════════════════════════════════════════════════
 
-async function processBulkCSV(bot, chatId, userId, csvText) {
+async function processBulkCSV(bot, chatId, userId, csvText, forceCategoryId = null) {
   clearState(userId);
-  const statusMsg = await bot.sendMessage(chatId, '⏳ Parsing CSV and validating...');
 
-  const preview = await productManager.createBulkPreview(csvText, userId);
-
-  let text =
-    `📋 *Bulk Import Preview*\n\n` +
-    `━━━━━━━━━━━━━━━━━━━━━\n` +
-    `📊 *Summary*\n` +
-    `• Total rows: *${preview.totalRows}*\n` +
-    `• New products: *${preview.creates}*\n` +
-    `• Updates (by SKU): *${preview.updates}*\n` +
-    `• Validation errors: *${preview.errors.length}*\n` +
-    `━━━━━━━━━━━━━━━━━━━━━\n`;
-
-  if (preview.errors.length > 0) {
-    text += `\n⚠️ *Errors:*\n`;
-    for (const err of preview.errors.slice(0, 10)) {
-      text += `• ${err}\n`;
-    }
-    if (preview.errors.length > 10) text += `_...and ${preview.errors.length - 10} more_\n`;
-  }
-
-  if (preview.previewRows.length > 0) {
-    text += `\n📝 *Preview (first ${Math.min(preview.previewRows.length, 5)}):*\n`;
-    for (const row of preview.previewRows.slice(0, 5)) {
-      text += `• ${row._action === 'update' ? '✏️' : '🆕'} ${row.name} — $${row.price}\n`;
-    }
-  }
-
-  const buttons = [];
-  if (preview.totalRows > 0) {
-    buttons.push([
-      { text: `✅ Commit ${preview.totalRows} items`, callback_data: `pm_bulk_commit_${preview.batchId}` },
-      { text: '❌ Cancel', callback_data: `pm_bulk_cancel_${preview.batchId}` }
-    ]);
-  } else {
-    buttons.push([{ text: '🔙 Back', callback_data: 'pm_bulk_menu' }]);
+  let statusMsg;
+  try {
+    statusMsg = await bot.sendMessage(chatId, '⏳ Parsing data and validating...');
+  } catch (err) {
+    logger.error('PRODUCT', 'Failed to send status message', err);
+    return true;
   }
 
   try {
-    await bot.editMessageText(text, {
-      chat_id: chatId,
-      message_id: statusMsg.message_id,
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: buttons }
-    });
-  } catch {
-    await bot.sendMessage(chatId, text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: buttons } });
+    const preview = await productManager.createBulkPreview(csvText, userId, forceCategoryId);
+
+    let text =
+      `📋 *Bulk Import Preview*\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📊 *Summary*\n` +
+      `• Total valid rows: *${preview.totalRows}*\n` +
+      `• New products: *${preview.creates}*\n` +
+      `• Updates (by SKU): *${preview.updates}*\n` +
+      `• Validation errors: *${preview.errors.length}*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n`;
+
+    if (preview.errors.length > 0) {
+      text += `\n⚠️ *Errors:*\n`;
+      for (const err of preview.errors.slice(0, 10)) {
+        text += `• ${err}\n`;
+      }
+      if (preview.errors.length > 10) text += `_...and ${preview.errors.length - 10} more_\n`;
+    }
+
+    if (preview.previewRows.length > 0) {
+      text += `\n📝 *Preview (first ${Math.min(preview.previewRows.length, 5)}):*\n`;
+      for (const row of preview.previewRows.slice(0, 5)) {
+        text += `• ${row._action === 'update' ? '✏️' : '🆕'} ${row.name} — $${row.price}\n`;
+      }
+    }
+
+    const buttons = [];
+    if (preview.totalRows > 0) {
+      buttons.push([
+        { text: `✅ Commit ${preview.totalRows} items`, callback_data: `pm_bulk_commit_${preview.batchId}` },
+        { text: '❌ Cancel', callback_data: `pm_bulk_cancel_${preview.batchId}` }
+      ]);
+    } else {
+      text += `\n_No valid rows to import. Check your data format._`;
+      buttons.push([{ text: '🔙 Try Again', callback_data: 'pm_bulk_menu' }]);
+    }
+
+    try {
+      await bot.editMessageText(text, {
+        chat_id: chatId,
+        message_id: statusMsg.message_id,
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: buttons }
+      });
+    } catch {
+      await bot.sendMessage(chatId, text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: buttons } });
+    }
+  } catch (err) {
+    logger.error('PRODUCT', 'Bulk CSV processing error', err);
+    try {
+      await bot.editMessageText(
+        `❌ *Bulk Import Failed*\n\n*Error:* ${err.message}\n\nPlease check your data format and try again.`,
+        {
+          chat_id: chatId,
+          message_id: statusMsg.message_id,
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '🔙 Bulk Menu', callback_data: 'pm_bulk_menu' }]] }
+        }
+      );
+    } catch {
+      await bot.sendMessage(chatId, `❌ Bulk import failed: ${err.message}`);
+    }
   }
 
   return true;
@@ -1150,10 +1384,10 @@ export async function handleProductAddSave(bot, query) {
     `✅ *Product created!*\n\n📌 *${state.productData.name}*\n💰 $${state.productData.price}\n🆔 ID: \`${res.id}\``,
     [
       [
-        { text: '➕ Add Another', callback_data: 'pm_prod_add_cat' },
+        { text: '➕ Add Another', callback_data: `pm_prod_add_in_${state.productData.category_id}` },
         { text: '👁️ View Product', callback_data: `pm_prod_view_${res.id}` }
       ],
-      [{ text: '🔙 Back', callback_data: 'pm_prod_menu' }]
+      [{ text: '🔙 Products', callback_data: 'pm_prod_menu' }]
     ],
     messageId
   );

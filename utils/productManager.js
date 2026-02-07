@@ -119,6 +119,32 @@ class ProductManager {
     );
   }
 
+  /**
+   * Check if a category is a leaf (has no active subcategories).
+   * Only leaf categories can hold products.
+   */
+  async isLeafCategory(catId) {
+    const row = await get(
+      `SELECT COUNT(*) AS c FROM categories WHERE parent_id = ? AND status = 'active'`,
+      [catId]
+    );
+    return (row?.c || 0) === 0;
+  }
+
+  /**
+   * Get all leaf categories (no children) — for bulk import pickers.
+   */
+  async getLeafCategories() {
+    return all(`
+      SELECT c.id, c.name, c.parent_id,
+        (SELECT COUNT(*) FROM products p WHERE p.category_id = c.id AND p.status = 'active') AS productCount
+      FROM categories c
+      WHERE c.status = 'active'
+        AND c.id NOT IN (SELECT DISTINCT parent_id FROM categories WHERE parent_id IS NOT NULL AND status = 'active')
+      ORDER BY c.name ASC
+    `);
+  }
+
   /** Get single category by ID. */
   async getCategory(id) {
     return get(`SELECT * FROM categories WHERE id = ?`, [id]);
@@ -388,6 +414,11 @@ class ProductManager {
     const cat = await this.getCategory(data.category_id);
     if (!cat || cat.status !== 'active') return { ok: false, error: 'Category not found or inactive.' };
 
+    // Only allow products in leaf categories (no subcategories)
+    if (!await this.isLeafCategory(data.category_id)) {
+      return { ok: false, error: `Category "${cat.name}" has subcategories. Products can only be added to leaf categories (categories with no children).` };
+    }
+
     // SKU uniqueness
     if (data.sku) {
       const dup = await get(`SELECT id FROM products WHERE sku = ? AND status != 'archived'`, [data.sku.trim()]);
@@ -512,25 +543,120 @@ class ProductManager {
     return { ok: true };
   }
 
+  /**
+   * Nuke ALL products — archives every active product.
+   * Returns count of nuked products.
+   */
+  async nukeAllProducts(adminId) {
+    const activeProducts = await all(
+      `SELECT * FROM products WHERE status = 'active'`
+    );
+
+    if (activeProducts.length === 0) {
+      return { ok: true, count: 0 };
+    }
+
+    const batchId = generateBatchId();
+
+    await rawRun('BEGIN TRANSACTION');
+    try {
+      for (const p of activeProducts) {
+        await run(`UPDATE products SET status = 'archived', updated_at = ? WHERE id = ?`, [now(), p.id]);
+        await this._recordHistory('product', p.id, 'delete', p, { ...p, status: 'archived' }, adminId, batchId);
+      }
+
+      // Record as bulk operation so it can be reverted
+      await run(
+        `INSERT INTO bulk_operations (batch_id, type, status, total_items, success_count, error_count, preview_data, errors, created_by, created_at, committed_at)
+         VALUES (?, 'nuke', 'committed', ?, ?, 0, '[]', '[]', ?, ?, ?)`,
+        [batchId, activeProducts.length, activeProducts.length, adminId, now(), now()]
+      );
+
+      await rawRun('COMMIT');
+    } catch (err) {
+      await rawRun('ROLLBACK');
+      logger.error('PRODUCT', `Nuke rollback`, err);
+      return { ok: false, error: 'Database error during nuke. Transaction rolled back.' };
+    }
+
+    this._invalidateCategoryCache();
+    logger.info('PRODUCT', `NUKE ALL: ${activeProducts.length} products archived by admin ${adminId}, batch=${batchId}`);
+    return { ok: true, count: activeProducts.length, batchId };
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   //  BULK OPERATIONS
   // ═══════════════════════════════════════════════════════════════════════
 
   /**
-   * Parse CSV text into product rows.
-   * Expected columns: sku, name, description, price, category_name, stock_quantity
-   * OR:               sku, name, description, price, category_id, stock_quantity
+   * Parse CSV/TXT text into product rows.
+   * Auto-detects column layout from the header row.
+   *
+   * Supported column names (case-insensitive, flexible aliases):
+   *   name / product_name / product / title         → name  (REQUIRED)
+   *   price / cost / amount                          → price (REQUIRED)
+   *   category_name / category / cat                 → resolved to category_id
+   *   category_id / cat_id                           → category_id
+   *   description / desc / details                   → description
+   *   sku / product_code / code                      → sku
+   *   stock_quantity / stock / qty / quantity         → stock_quantity
+   *
+   * Delimiter: auto-detected (comma, semicolon, tab, pipe).
+   * If no header detected, assumes: name, price, category_name
+   *
    * Returns { rows: [], errors: [] }
    */
-  async parseBulkCSV(text) {
+  async parseBulkCSV(text, forceCategoryId = null) {
     const lines = text.split(/\r?\n/).filter(l => l.trim());
-    if (lines.length < 2) return { rows: [], errors: ['File must have a header row and at least one data row.'] };
+    if (lines.length === 0) return { rows: [], errors: ['File is empty.'] };
 
-    const header = lines[0].split(',').map(h => h.trim().toLowerCase());
-    const requiredCols = ['name', 'price'];
-    for (const col of requiredCols) {
-      if (!header.includes(col)) return { rows: [], errors: [`Missing required column: ${col}`] };
+    // Auto-detect delimiter from first line
+    const delimiter = this._detectDelimiter(lines[0]);
+
+    // Column alias map
+    const ALIASES = {
+      name: 'name', product_name: 'name', product: 'name', title: 'name',
+      price: 'price', cost: 'price', amount: 'price',
+      category_name: 'category_name', category: 'category_name', cat: 'category_name',
+      category_id: 'category_id', cat_id: 'category_id',
+      description: 'description', desc: 'description', details: 'description',
+      sku: 'sku', product_code: 'sku', code: 'sku',
+      stock_quantity: 'stock_quantity', stock: 'stock_quantity', qty: 'stock_quantity', quantity: 'stock_quantity'
+    };
+
+    // Parse header — try to detect if first row is a header
+    const firstLineParts = this._parseCSVLine(lines[0], delimiter);
+    const normalizedFirst = firstLineParts.map(h => h.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_'));
+
+    let header;
+    let dataStartLine;
+    const hasHeader = normalizedFirst.some(h => ALIASES[h] !== undefined);
+
+    if (hasHeader) {
+      header = normalizedFirst.map(h => ALIASES[h] || h);
+      dataStartLine = 1;
+    } else {
+      // No header detected — assume minimal: name, price, category_name
+      if (firstLineParts.length === 2) {
+        header = ['name', 'price'];
+      } else if (firstLineParts.length === 3) {
+        header = ['name', 'price', 'category_name'];
+      } else if (firstLineParts.length >= 6) {
+        header = ['sku', 'name', 'description', 'price', 'category_name', 'stock_quantity'];
+      } else {
+        header = ['name', 'description', 'price', 'category_name'];
+      }
+      dataStartLine = 0;
     }
+
+    // Validate required columns
+    if (!header.includes('name')) return { rows: [], errors: ['Missing required column: name (or product_name, title)'] };
+    if (!header.includes('price')) return { rows: [], errors: ['Missing required column: price (or cost, amount)'] };
+    if (!header.includes('category_name') && !header.includes('category_id') && !forceCategoryId) {
+      return { rows: [], errors: ['Missing required column: category_name or category_id (not needed if importing to a specific category)'] };
+    }
+
+    if (dataStartLine >= lines.length) return { rows: [], errors: ['File must have at least one data row.'] };
 
     // Build category name→id map for resolution
     const allCats = await all(`SELECT id, name FROM categories WHERE status = 'active'`);
@@ -540,33 +666,56 @@ class ProductManager {
     const rows = [];
     const errors = [];
 
-    for (let i = 1; i < lines.length; i++) {
-      const vals = this._parseCSVLine(lines[i]);
-      if (vals.length !== header.length) {
-        errors.push(`Row ${i + 1}: column count mismatch (expected ${header.length}, got ${vals.length})`);
+    for (let i = dataStartLine; i < lines.length; i++) {
+      const vals = this._parseCSVLine(lines[i], delimiter);
+      if (vals.length < 2) {
+        // Skip truly empty lines silently
+        if (vals.length === 1 && !vals[0].trim()) continue;
+        errors.push(`Row ${i + 1}: too few columns (got ${vals.length}, expected at least 2)`);
         continue;
       }
 
       const row = {};
-      header.forEach((col, idx) => { row[col] = vals[idx]?.trim(); });
+      header.forEach((col, idx) => {
+        if (idx < vals.length) row[col] = vals[idx]?.trim();
+      });
+
+      // Name is required
+      if (!row.name || !row.name.trim()) {
+        errors.push(`Row ${i + 1}: empty product name`);
+        continue;
+      }
 
       // Resolve category
-      let categoryId = null;
-      if (row.category_id) {
-        categoryId = parseInt(row.category_id, 10);
-        if (!catIdSet.has(categoryId)) {
-          errors.push(`Row ${i + 1}: category_id ${row.category_id} does not exist`);
-          continue;
+      let categoryId = forceCategoryId || null;
+      if (!categoryId) {
+        if (row.category_id) {
+          categoryId = parseInt(row.category_id, 10);
+          if (!catIdSet.has(categoryId)) {
+            errors.push(`Row ${i + 1}: category_id ${row.category_id} does not exist`);
+            continue;
+          }
+        } else if (row.category_name) {
+          const catName = row.category_name.toLowerCase();
+          categoryId = catNameMap.get(catName);
+          if (!categoryId) {
+            // Fuzzy match — try partial match
+            for (const [name, id] of catNameMap) {
+              if (name.includes(catName) || catName.includes(name)) {
+                categoryId = id;
+                break;
+              }
+            }
+            if (!categoryId) {
+              errors.push(`Row ${i + 1}: category "${row.category_name}" not found`);
+              continue;
+            }
+          }
         }
-      } else if (row.category_name || row.category) {
-        const catName = (row.category_name || row.category).toLowerCase();
-        categoryId = catNameMap.get(catName);
-        if (!categoryId) {
-          errors.push(`Row ${i + 1}: category "${row.category_name || row.category}" not found`);
-          continue;
-        }
-      } else {
-        errors.push(`Row ${i + 1}: no category_id or category_name specified`);
+      }
+
+      if (!categoryId) {
+        errors.push(`Row ${i + 1}: no category specified`);
         continue;
       }
 
@@ -590,8 +739,27 @@ class ProductManager {
     return { rows, errors };
   }
 
+  /** Auto-detect CSV delimiter from the first line. */
+  _detectDelimiter(line) {
+    const counts = {
+      ',': (line.match(/,/g) || []).length,
+      ';': (line.match(/;/g) || []).length,
+      '\t': (line.match(/\t/g) || []).length,
+      '|': (line.match(/\|/g) || []).length
+    };
+    let best = ',';
+    let bestCount = 0;
+    for (const [delim, count] of Object.entries(counts)) {
+      if (count > bestCount) {
+        best = delim;
+        bestCount = count;
+      }
+    }
+    return best;
+  }
+
   /** Simple CSV line parser (handles quoted fields). */
-  _parseCSVLine(line) {
+  _parseCSVLine(line, delimiter = ',') {
     const result = [];
     let current = '';
     let inQuotes = false;
@@ -604,7 +772,7 @@ class ProductManager {
         } else {
           inQuotes = !inQuotes;
         }
-      } else if (ch === ',' && !inQuotes) {
+      } else if (ch === delimiter && !inQuotes) {
         result.push(current);
         current = '';
       } else {
@@ -617,9 +785,12 @@ class ProductManager {
 
   /**
    * Create a bulk import preview (no data written yet).
+   * @param {string} csvText - raw CSV/TXT content
+   * @param {number} adminId - admin performing the import
+   * @param {number|null} forceCategoryId - if set, all rows go to this category (no cat column needed)
    */
-  async createBulkPreview(csvText, adminId) {
-    const parsed = await this.parseBulkCSV(csvText);
+  async createBulkPreview(csvText, adminId, forceCategoryId = null) {
+    const parsed = await this.parseBulkCSV(csvText, forceCategoryId);
     const batchId = generateBatchId();
 
     // Check for duplicate SKUs within the batch
