@@ -9,7 +9,7 @@ import uiOptimizer from '../utils/uiOptimizer.js';
 
 export async function showRootCategories(bot, chatId, messageId = null) {
   try {
-    db.all(`SELECT * FROM categories WHERE parent_id IS NULL`, [], async (err, rows) => {
+    db.all(`SELECT * FROM categories WHERE parent_id IS NULL AND (status IS NULL OR status = 'active')`, [], async (err, rows) => {
       if (err) {
         console.error('[DB] Root Categories Fetch Error:', err.message);
         return messageTranslator.sendTranslatedMessage(bot, chatId, 'error_categories');

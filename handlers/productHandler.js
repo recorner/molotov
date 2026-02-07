@@ -18,7 +18,7 @@ export async function showProductsInCategory(bot, chatId, categoryId, page = 1, 
   const offset = Math.max((page - 1) * PAGE_SIZE, 0);
 
   // First: check if products exist at all for category
-  db.get(`SELECT COUNT(*) as total FROM products WHERE category_id = ?`, [categoryId], async (err, result) => {
+  db.get(`SELECT COUNT(*) as total FROM products WHERE category_id = ? AND (status IS NULL OR status = 'active')`, [categoryId], async (err, result) => {
     if (err) {
       console.error('[DB] Count Query Error:', err.message);
       return messageTranslator.sendTranslatedMessage(bot, chatId, 'error_products');
@@ -36,7 +36,7 @@ export async function showProductsInCategory(bot, chatId, categoryId, page = 1, 
 
     // Now safely fetch paginated products
     db.all(
-      `SELECT * FROM products WHERE category_id = ? LIMIT ? OFFSET ?`,
+      `SELECT * FROM products WHERE category_id = ? AND (status IS NULL OR status = 'active') LIMIT ? OFFSET ?`,
       [categoryId, PAGE_SIZE, offset],
       async (err, products) => {
         if (err) {

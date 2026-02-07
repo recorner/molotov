@@ -19,7 +19,7 @@ export async function handleCategoryNavigation(bot, query) {
   }
 
   // Check if it has subcategories
-  db.all(`SELECT * FROM categories WHERE parent_id = ?`, [categoryId], async (err, subcategories) => {
+  db.all(`SELECT * FROM categories WHERE parent_id = ? AND (status IS NULL OR status = 'active')`, [categoryId], async (err, subcategories) => {
     if (err) {
       console.error('[DB] Category Query Error:', err.message);
       return messageTranslator.answerTranslatedCallback(bot, query.id, 'error_loading', query.from.id);

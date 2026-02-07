@@ -47,6 +47,13 @@ class MigrationManager {
         description: 'Fix missing columns for language support',
         up: this.migration_006_fix_language_columns.bind(this),
         down: this.migration_006_down.bind(this)
+      },
+      {
+        version: 7,
+        name: 'product_management_system',
+        description: 'Enhanced categories/products, audit history, bulk operations, indexes',
+        up: this.migration_007_product_management.bind(this),
+        down: this.migration_007_down.bind(this)
       }
     ];
     
@@ -518,6 +525,96 @@ class MigrationManager {
 
   async migration_006_down() {
     logger.warn('MIGRATION', 'Rollback for migration 006 not implemented (language column fixes)');
+  }
+
+  // Migration 007: Product management system — enhanced columns, audit history, bulk ops, indexes
+  async migration_007_product_management() {
+    logger.info('MIGRATION', 'Applying product management system migration');
+
+    const runSQL = (sql) => new Promise((resolve) => {
+      db.run(sql, (err) => {
+        if (err && !err.message.includes('duplicate column') && !err.message.includes('already exists')) {
+          logger.error('MIGRATION', `SQL error: ${err.message}`, { sql: sql.substring(0, 120) });
+        }
+        resolve();
+      });
+    });
+
+    // ── Enhanced categories columns ──
+    await runSQL(`ALTER TABLE categories ADD COLUMN status TEXT DEFAULT 'active'`);
+    await runSQL(`ALTER TABLE categories ADD COLUMN sort_order INTEGER DEFAULT 0`);
+    await runSQL(`ALTER TABLE categories ADD COLUMN description TEXT`);
+    await runSQL(`ALTER TABLE categories ADD COLUMN created_at TIMESTAMP`);
+    await runSQL(`ALTER TABLE categories ADD COLUMN updated_at TIMESTAMP`);
+    await runSQL(`ALTER TABLE categories ADD COLUMN created_by INTEGER`);
+    // Backfill timestamps for existing rows
+    await runSQL(`UPDATE categories SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL`);
+    await runSQL(`UPDATE categories SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
+
+    // ── Enhanced products columns ──
+    await runSQL(`ALTER TABLE products ADD COLUMN sku TEXT`);
+    await runSQL(`ALTER TABLE products ADD COLUMN status TEXT DEFAULT 'active'`);
+    await runSQL(`ALTER TABLE products ADD COLUMN stock_quantity INTEGER DEFAULT -1`);
+    await runSQL(`ALTER TABLE products ADD COLUMN image_url TEXT`);
+    await runSQL(`ALTER TABLE products ADD COLUMN sort_order INTEGER DEFAULT 0`);
+    await runSQL(`ALTER TABLE products ADD COLUMN created_at TIMESTAMP`);
+    await runSQL(`ALTER TABLE products ADD COLUMN updated_at TIMESTAMP`);
+    await runSQL(`ALTER TABLE products ADD COLUMN created_by INTEGER`);
+    // Backfill timestamps for existing rows
+    await runSQL(`UPDATE products SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL`);
+    await runSQL(`UPDATE products SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
+
+    // ── Product history / audit trail ──
+    await runSQL(`
+      CREATE TABLE IF NOT EXISTS product_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_type TEXT NOT NULL,
+        entity_id INTEGER NOT NULL,
+        action TEXT NOT NULL,
+        old_data TEXT,
+        new_data TEXT,
+        changed_by INTEGER NOT NULL,
+        changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        batch_id TEXT,
+        reverted INTEGER DEFAULT 0
+      )
+    `);
+
+    // ── Bulk operations ──
+    await runSQL(`
+      CREATE TABLE IF NOT EXISTS bulk_operations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id TEXT UNIQUE NOT NULL,
+        type TEXT NOT NULL,
+        status TEXT DEFAULT 'pending_preview',
+        total_items INTEGER DEFAULT 0,
+        success_count INTEGER DEFAULT 0,
+        error_count INTEGER DEFAULT 0,
+        preview_data TEXT,
+        errors TEXT,
+        created_by INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        committed_at TIMESTAMP
+      )
+    `);
+
+    // ── Performance indexes for 10K+ products ──
+    await runSQL(`CREATE INDEX IF NOT EXISTS idx_products_category_status ON products(category_id, status)`);
+    await runSQL(`CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku)`);
+    await runSQL(`CREATE INDEX IF NOT EXISTS idx_products_status ON products(status)`);
+    await runSQL(`CREATE INDEX IF NOT EXISTS idx_products_name ON products(name)`);
+    await runSQL(`CREATE INDEX IF NOT EXISTS idx_categories_parent_status ON categories(parent_id, status)`);
+    await runSQL(`CREATE INDEX IF NOT EXISTS idx_history_entity ON product_history(entity_type, entity_id)`);
+    await runSQL(`CREATE INDEX IF NOT EXISTS idx_history_batch ON product_history(batch_id)`);
+    await runSQL(`CREATE INDEX IF NOT EXISTS idx_history_changed_at ON product_history(changed_at)`);
+    await runSQL(`CREATE INDEX IF NOT EXISTS idx_bulk_ops_batch ON bulk_operations(batch_id)`);
+    await runSQL(`CREATE INDEX IF NOT EXISTS idx_bulk_ops_status ON bulk_operations(status)`);
+
+    logger.info('MIGRATION', 'Product management system migration complete');
+  }
+
+  async migration_007_down() {
+    logger.warn('MIGRATION', 'Rollback for migration 007: soft-delete tables. Manual cleanup required.');
   }
 
   // Export for use in bot.js

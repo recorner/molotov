@@ -48,6 +48,7 @@ import TelegramSafety from './utils/telegramSafety.js';
 
 // Sidekick System Imports
 import { handleSidekickCallback, initializeSidekickInputHandler } from './handlers/sidekickHandler.js';
+import { handleTomcatCommand, handleProductManagerCallback, handleProductManagerInput, handleProductManagerDocument, handleProductAddSave } from './handlers/productManagerHandler.js';
 import BlockchainMonitor from './utils/blockchainMonitor.js';
 import TransactionManager from './utils/transactionManager.js';
 import PinManager from './utils/pinManager.js';
@@ -382,6 +383,7 @@ bot.onText(/\/cocktail/, (msg) => handleAdminCommand(bot, msg));
 bot.onText(/\/poke/, (msg) => handlePokeCommand(bot, msg));
 bot.onText(/\/merger/, (msg) => usernameNormalizer.handleMergerCommand(bot, msg));
 bot.onText(/\/heads/, (msg) => adminManager.handleHeadsCommand(bot, msg));
+bot.onText(/\/tomcat/, (msg) => handleTomcatCommand(bot, msg));
 bot.onText(/\/promote/, (msg) => adminManager.handlePromoteCommand(bot, msg));
 bot.onText(/\/demote/, (msg) => adminManager.handleDemoteCommand(bot, msg));
 
@@ -534,6 +536,12 @@ bot.on('callback_query', async (query) => {
     }
 
 
+
+    // Product manager callbacks (pm_ prefix)
+    if (data.startsWith('pm_')) {
+      if (data === 'pm_prod_add_save') return await handleProductAddSave(bot, query);
+      return await handleProductManagerCallback(bot, query);
+    }
 
     // Admin payment actions (must come before general admin routing)
     if (data.startsWith('admin_confirm_') || data.startsWith('admin_cancel_')) {
@@ -735,8 +743,20 @@ bot.on('message', async (msg) => {
     }
   }
 
+  // Handle product manager file uploads (CSV)
+  if (msg.document) {
+    const pmDocHandled = await handleProductManagerDocument(bot, msg);
+    if (pmDocHandled) return;
+  }
+
   // Skip processing for commands
   if (text && text.startsWith('/')) return;
+
+  // Handle product manager text input (wizard steps)
+  if (text && !text.startsWith('/')) {
+    const pmHandled = await handleProductManagerInput(bot, msg);
+    if (pmHandled) return;
+  }
 
   // Handle wallet input if it's text and not a command
   if (text && !text.startsWith('/')) {
