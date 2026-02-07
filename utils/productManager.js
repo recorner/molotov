@@ -544,12 +544,20 @@ class ProductManager {
   }
 
   /**
-   * Nuke ALL products — archives every active product.
+   * Nuke products in a category (and its descendants) — archives them all.
+   * @param {number} categoryId — target category
+   * @param {number} adminId
    * Returns count of nuked products.
    */
-  async nukeAllProducts(adminId) {
+  async nukeCategoryProducts(categoryId, adminId) {
+    // Collect this category + all descendant category IDs
+    const catIds = await this._collectDescendantCategoryIds(categoryId);
+    if (catIds.length === 0) return { ok: true, count: 0 };
+
+    const placeholders = catIds.map(() => '?').join(',');
     const activeProducts = await all(
-      `SELECT * FROM products WHERE status = 'active'`
+      `SELECT * FROM products WHERE status = 'active' AND category_id IN (${placeholders})`,
+      catIds
     );
 
     if (activeProducts.length === 0) {
@@ -580,8 +588,23 @@ class ProductManager {
     }
 
     this._invalidateCategoryCache();
-    logger.info('PRODUCT', `NUKE ALL: ${activeProducts.length} products archived by admin ${adminId}, batch=${batchId}`);
+    logger.info('PRODUCT', `NUKE CAT ${categoryId}: ${activeProducts.length} products archived by admin ${adminId}, batch=${batchId}`);
     return { ok: true, count: activeProducts.length, batchId };
+  }
+
+  /**
+   * Collect a category ID and all its descendant category IDs recursively.
+   */
+  async _collectDescendantCategoryIds(categoryId) {
+    const ids = [categoryId];
+    const children = await all(
+      `SELECT id FROM categories WHERE parent_id = ? AND status = 'active'`, [categoryId]
+    );
+    for (const child of children) {
+      const childIds = await this._collectDescendantCategoryIds(child.id);
+      ids.push(...childIds);
+    }
+    return ids;
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -872,7 +895,7 @@ class ProductManager {
               if (!res.ok) throw new Error(res.error);
               // Tag history with batchId
               await run(
-                `UPDATE product_history SET batch_id = ? WHERE entity_type = 'product' AND entity_id = ? ORDER BY id DESC LIMIT 1`,
+                `UPDATE product_history SET batch_id = ? WHERE id = (SELECT id FROM product_history WHERE entity_type = 'product' AND entity_id = ? ORDER BY id DESC LIMIT 1)`,
                 [batchId, row._existingId]
               );
             } else {
@@ -887,7 +910,7 @@ class ProductManager {
               if (!res.ok) throw new Error(res.error);
               // Tag history
               await run(
-                `UPDATE product_history SET batch_id = ? WHERE entity_type = 'product' AND entity_id = ? ORDER BY id DESC LIMIT 1`,
+                `UPDATE product_history SET batch_id = ? WHERE id = (SELECT id FROM product_history WHERE entity_type = 'product' AND entity_id = ? ORDER BY id DESC LIMIT 1)`,
                 [batchId, res.id]
               );
             }

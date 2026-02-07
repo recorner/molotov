@@ -143,9 +143,6 @@ async function showProductMenu(bot, chatId, messageId = null) {
       { text: '➕ Add Product', callback_data: 'pm_prod_add_cat' },
       { text: '🗄️ Archived Items', callback_data: 'pm_prod_archived_1' }
     ],
-    [
-      { text: '💣 Nuke All Products', callback_data: 'pm_nuke_start' }
-    ],
     [{ text: '🔙 Main Menu', callback_data: 'pm_main' }]
   ];
 
@@ -223,6 +220,12 @@ async function showProductList(bot, chatId, categoryId, page, messageId = null) 
       { text: '➕ Add Product Here', callback_data: `pm_prod_add_in_${categoryId}` },
       { text: '📥 Bulk Import Here', callback_data: `pm_bulk_to_cat_${categoryId}` }
     ]);
+    if (result.total > 0) {
+      buttons.push([{ text: `💣 Nuke All in ${cat?.name}`, callback_data: `pm_nuke_cat_${categoryId}` }]);
+    }
+  } else if (result.total > 0 || subs.length > 0) {
+    // Parent category — nuke all descendants
+    buttons.push([{ text: `💣 Nuke All in ${cat?.name}`, callback_data: `pm_nuke_cat_${categoryId}` }]);
   }
 
   // Back: go to parent category, or browse root
@@ -347,18 +350,19 @@ async function showSearchResults(bot, chatId, query, page, messageId = null) {
 
 async function showBulkMenu(bot, chatId, messageId = null) {
   const text =
-    `📥 *Bulk Operations*\n\n` +
-    `Import products from a CSV or TXT file, or paste data directly.\n\n` +
+    `📥 *Bulk Import*\n\n` +
+    `Import products from a CSV/TXT file or paste data.\n\n` +
+    `*How it works:*\n` +
+    `1️⃣ Select a target category\n` +
+    `2️⃣ Upload a file or paste raw data\n\n` +
     `*Supported formats:*\n` +
-    `• \`name,price,category\` (minimal)\n` +
-    `• \`sku,name,desc,price,category,stock\` (full)\n` +
+    `• \`name,price\` (minimal — category auto-assigned)\n` +
+    `• \`sku,name,desc,price,stock\` (full)\n` +
     `• Auto-detects headers & delimiters\n` +
     `• Accepts .csv, .txt, .tsv files`;
 
   const buttons = [
-    [{ text: '📤 Send CSV/TXT File', callback_data: 'pm_bulk_import_start' }],
-    [{ text: '📋 Paste CSV Text', callback_data: 'pm_bulk_paste_start' }],
-    [{ text: '📂 Import to Specific Category', callback_data: 'pm_bulk_pick_cat' }],
+    [{ text: '📂 Select Category & Import', callback_data: 'pm_bulk_pick_cat' }],
     [{ text: '📜 Bulk Op History', callback_data: 'pm_bulk_history' }],
     [{ text: '🔙 Main Menu', callback_data: 'pm_main' }]
   ];
@@ -663,52 +667,68 @@ export async function handleProductManagerCallback(bot, query) {
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  //  NUKE ALL PRODUCTS
+  //  NUKE CATEGORY PRODUCTS
   // ═══════════════════════════════════════════════════════════════════
 
-  if (data === 'pm_nuke_start') {
-    const stats = await productManager.getStats();
-    if (stats.activeProducts === 0) {
-      return send(bot, chatId, '💣 _No active products to nuke._', [[{ text: '🔙 Products', callback_data: 'pm_prod_menu' }]], messageId);
+  if (data.startsWith('pm_nuke_cat_') && !data.includes('confirm') && !data.includes('exec')) {
+    const catId = parseInt(data.replace('pm_nuke_cat_', ''), 10);
+    const cat = await productManager.getCategory(catId);
+    if (!cat) return send(bot, chatId, '❌ Category not found.', [[{ text: '🔙 Back', callback_data: 'pm_prod_menu' }]], messageId);
+
+    // Count products in this category + descendants
+    const isLeaf = await productManager.isLeafCategory(catId);
+    const directCount = (await productManager.searchProducts({ categoryId: catId, status: 'active', pageSize: 1 })).total;
+    const descendantCount = isLeaf ? 0 : await productManager._countDescendantProducts(catId);
+    const totalCount = directCount + descendantCount;
+
+    if (totalCount === 0) {
+      return send(bot, chatId, '💣 _No active products in this category._', [[{ text: '🔙 Back', callback_data: `pm_prod_cat_${catId}` }]], messageId);
     }
+
+    let desc = `⚠️ This will archive *${totalCount}* product(s)`;
+    if (!isLeaf && descendantCount > 0) {
+      desc += ` (${directCount} direct + ${descendantCount} in subcategories)`;
+    }
+
     return send(bot, chatId,
-      `💣 *NUKE ALL PRODUCTS*\n\n` +
-      `⚠️ This will archive ALL *${stats.activeProducts}* active products.\n\n` +
+      `💣 *Nuke Products in "${cat.name}"*\n\n` +
+      `${desc}.\n\n` +
       `This action can be reverted from Bulk History.\n\n` +
-      `*Are you absolutely sure?*`,
+      `*Are you sure?*`,
       [
-        [{ text: '💣 YES, NUKE EVERYTHING', callback_data: 'pm_nuke_confirm' }],
-        [{ text: '❌ Cancel', callback_data: 'pm_prod_menu' }]
+        [{ text: `💣 YES, NUKE ${totalCount} PRODUCTS`, callback_data: `pm_nuke_cat_confirm_${catId}` }],
+        [{ text: '❌ Cancel', callback_data: `pm_prod_cat_${catId}` }]
       ], messageId);
   }
 
-  if (data === 'pm_nuke_confirm') {
-    const stats = await productManager.getStats();
+  if (data.startsWith('pm_nuke_cat_confirm_') && !data.includes('exec')) {
+    const catId = parseInt(data.replace('pm_nuke_cat_confirm_', ''), 10);
+    const cat = await productManager.getCategory(catId);
     return send(bot, chatId,
-      `💣🔴 *FINAL CONFIRMATION*\n\n` +
-      `You are about to archive *${stats.activeProducts}* products.\n\n` +
-      `Type the button below to proceed:`,
+      `💣🔴 *FINAL CONFIRMATION*\n\nNuke all products in *"${cat?.name}"* and its subcategories?`,
       [
-        [{ text: `☠️ NUKE ${stats.activeProducts} PRODUCTS NOW`, callback_data: 'pm_nuke_exec' }],
-        [{ text: '❌ Cancel — Take Me Back', callback_data: 'pm_prod_menu' }]
+        [{ text: `☠️ NUKE NOW`, callback_data: `pm_nuke_cat_exec_${catId}` }],
+        [{ text: '❌ Cancel', callback_data: `pm_prod_cat_${catId}` }]
       ], messageId);
   }
 
-  if (data === 'pm_nuke_exec') {
-    const statusMsg = await bot.sendMessage(chatId, '💣 Nuking all products...');
+  if (data.startsWith('pm_nuke_cat_exec_')) {
+    const catId = parseInt(data.replace('pm_nuke_cat_exec_', ''), 10);
+    const cat = await productManager.getCategory(catId);
+    const statusMsg = await bot.sendMessage(chatId, `💣 Nuking products in "${cat?.name}"...`);
     try {
-      const res = await productManager.nukeAllProducts(userId);
+      const res = await productManager.nukeCategoryProducts(catId, userId);
       if (!res.ok) {
         return bot.editMessageText(`❌ ${res.error}`, { chat_id: chatId, message_id: statusMsg.message_id });
       }
       return bot.editMessageText(
-        `💣 *NUKE COMPLETE*\n\n☠️ *${res.count}* products archived.\n🔖 Batch: \`${res.batchId}\`\n\n_You can revert this from Bulk History._`,
+        `💣 *NUKE COMPLETE*\n\n☠️ *${res.count}* products in "${cat?.name}" archived.\n🔖 Batch: \`${res.batchId}\`\n\n_You can revert this from Bulk History._`,
         {
           chat_id: chatId, message_id: statusMsg.message_id,
           parse_mode: 'Markdown',
           reply_markup: { inline_keyboard: [
             [{ text: '♻️ Undo Nuke', callback_data: `pm_bulk_revert_${res.batchId}` }],
-            [{ text: '🔙 Main Menu', callback_data: 'pm_main' }]
+            [{ text: '🔙 Back', callback_data: `pm_prod_cat_${catId}` }]
           ]}
         }
       );
@@ -835,39 +855,12 @@ export async function handleProductManagerCallback(bot, query) {
   if (data === 'pm_bulk_menu') return showBulkMenu(bot, chatId, messageId);
   if (data === 'pm_bulk_history') return showBulkHistory(bot, chatId, messageId);
 
-  // General bulk import (file) — any category
-  if (data === 'pm_bulk_import_start') {
-    setState(userId, { step: 'bulk_import_file' });
-    return send(bot, chatId,
-      `📤 *Bulk Import — Send File*\n\n` +
-      `Send me a CSV or TXT file with your products.\n\n` +
-      `*Supported column names:*\n` +
-      `\`name\`, \`price\`, \`category\` (required)\n` +
-      `\`sku\`, \`description\`, \`stock\` (optional)\n\n` +
-      `*Example:*\n` +
-      `\`\`\`\nname,price,category\nProduct A,29.99,USA CVV\nProduct B,49.99,Local Bank\n\`\`\`\n\n` +
-      `📎 _Send the file now, or press Cancel._`,
-      [[{ text: '🔙 Cancel', callback_data: 'pm_bulk_menu' }]], messageId);
-  }
-
-  // General bulk import (paste) — any category
-  if (data === 'pm_bulk_paste_start') {
-    setState(userId, { step: 'bulk_import_file' });
-    return send(bot, chatId,
-      `📋 *Bulk Import — Paste Data*\n\n` +
-      `Paste your CSV data as a text message.\n\n` +
-      `*Example:*\n` +
-      `\`\`\`\nname,price,category\nProduct A,29.99,USA CVV\nProduct B,49.99,Local Bank\n\`\`\`\n\n` +
-      `✏️ _Paste your data now, or press Cancel._`,
-      [[{ text: '🔙 Cancel', callback_data: 'pm_bulk_menu' }]], messageId);
-  }
-
   // Bulk import → pick category first
   if (data === 'pm_bulk_pick_cat') {
     return showCategoryPicker(bot, chatId, messageId, 'pm_bulk_to_cat_', '📥 *Bulk Import*\n\nSelect target category:', 'pm_bulk_menu');
   }
 
-  // Bulk import to specific category
+  // Bulk import to specific category — show file/paste options
   if (data.startsWith('pm_bulk_to_cat_')) {
     const catId = parseInt(data.replace('pm_bulk_to_cat_', ''), 10);
 
@@ -880,14 +873,44 @@ export async function handleProductManagerCallback(bot, query) {
     }
 
     const cat = await productManager.getCategory(catId);
-    setState(userId, { step: 'bulk_import_file', forceCategoryId: catId, catName: cat?.name });
     return send(bot, chatId,
       `📥 *Bulk Import to "${cat?.name}"*\n\n` +
-      `Send a CSV/TXT file or paste text.\n\n` +
       `Since a category is pre-selected, you only need:\n` +
       `\`name,price\` (minimal) or \`name,price,description,stock\`\n\n` +
-      `📎 _Send file or paste data now._`,
-      [[{ text: '🔙 Cancel', callback_data: 'pm_bulk_menu' }]], messageId);
+      `How would you like to import?`,
+      [
+        [{ text: '📤 Upload CSV/TXT File', callback_data: `pm_bulk_file_${catId}` }],
+        [{ text: '📋 Paste Raw Data', callback_data: `pm_bulk_paste_${catId}` }],
+        [{ text: '🔙 Pick Another Category', callback_data: 'pm_bulk_pick_cat' }],
+        [{ text: '🔙 Bulk Menu', callback_data: 'pm_bulk_menu' }]
+      ], messageId);
+  }
+
+  // Bulk import — file upload mode for a category
+  if (data.startsWith('pm_bulk_file_')) {
+    const catId = parseInt(data.replace('pm_bulk_file_', ''), 10);
+    const cat = await productManager.getCategory(catId);
+    setState(userId, { step: 'bulk_import_file', forceCategoryId: catId, catName: cat?.name });
+    return send(bot, chatId,
+      `📤 *Upload File to "${cat?.name}"*\n\n` +
+      `Send me a \`.csv\`, \`.txt\`, or \`.tsv\` file now.\n\n` +
+      `*Example content:*\n` +
+      `\`\`\`\nname,price\nProduct A,29.99\nProduct B,49.99\n\`\`\``,
+      [[{ text: '🔙 Cancel', callback_data: `pm_bulk_to_cat_${catId}` }]], messageId);
+  }
+
+  // Bulk import — paste mode for a category
+  if (data.startsWith('pm_bulk_paste_')) {
+    const catId = parseInt(data.replace('pm_bulk_paste_', ''), 10);
+    const cat = await productManager.getCategory(catId);
+    setState(userId, { step: 'bulk_import_file', forceCategoryId: catId, catName: cat?.name });
+    return send(bot, chatId,
+      `📋 *Paste Data for "${cat?.name}"*\n\n` +
+      `Paste your product data as a text message.\n\n` +
+      `*Example:*\n` +
+      `\`\`\`\nname,price\nProduct A,29.99\nProduct B,49.99\n\`\`\`\n\n` +
+      `✏️ _Paste your data now._`,
+      [[{ text: '🔙 Cancel', callback_data: `pm_bulk_to_cat_${catId}` }]], messageId);
   }
 
   // Bulk preview — commit
