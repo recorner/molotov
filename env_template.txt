@@ -54,6 +54,14 @@ BOT_ABOUT_TEXT=🛒 Premium Digital Marketplace\n\n💎 Molotov Bot offers exclu
 # How often to check for new transactions (milliseconds)
 BLOCKCHAIN_CHECK_INTERVAL=30000
 
+# === USERNAME SYNC / NORMALIZATION ===
+# Enable the daily username normalization service (true/false, default: true)
+USERNAME_SYNC_ENABLED=true
+# Cron expression for when the sync runs (default: 03:00 daily)
+USERNAME_SYNC_CRON=0 3 * * *
+# Timezone for the cron schedule (IANA format)
+USERNAME_SYNC_TIMEZONE=Africa/Nairobi
+
 # === INSTRUCTIONS ===
 # 1. Get BlockCypher API key (optional for free tier): https://accounts.blockcypher.com/
 # 2. Copy this file to .env and fill in your API keys if desired

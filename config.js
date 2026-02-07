@@ -13,6 +13,11 @@ export const ADMIN_GROUP = process.env.ADMIN_GROUP ? parseInt(process.env.ADMIN_
 export const VOUCH_CHANNEL = process.env.VOUCH_CHANNEL ? parseInt(process.env.VOUCH_CHANNEL) : null;
 export const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME;
 
+// Username Sync / Normalization settings
+export const USERNAME_SYNC_ENABLED = process.env.USERNAME_SYNC_ENABLED !== 'false'; // default ON
+export const USERNAME_SYNC_CRON = process.env.USERNAME_SYNC_CRON || '0 3 * * *'; // default 03:00 daily
+export const USERNAME_SYNC_TIMEZONE = process.env.USERNAME_SYNC_TIMEZONE || 'Africa/Nairobi';
+
 // Bot description and about configuration
 export const BOT_DESCRIPTION = process.env.BOT_DESCRIPTION || '🚀 Molotov Bot - Your premium digital marketplace for cryptocurrency products. Secure payments via Bitcoin and Litecoin. Browse verified accounts, proxy networks, phone numbers, and more. Trusted by professionals worldwide.';
 export const BOT_SHORT_DESCRIPTION = process.env.BOT_SHORT_DESCRIPTION || '💎 Premium digital marketplace for crypto products. Secure, verified, trusted.';

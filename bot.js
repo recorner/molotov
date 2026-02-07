@@ -32,6 +32,8 @@ import { handleCategoryNavigation } from './handlers/categoryHandler.js';
 import { showProductsInCategory } from './handlers/productHandler.js';
 import { handleWalletCallback } from './handlers/walletHandler.js';
 import { setupDailyWalletPrompt, handleWalletPromptResponse } from './scheduler.js';
+import usernameNormalizer from './utils/usernameNormalizer.js';
+import { USERNAME_SYNC_ENABLED, USERNAME_SYNC_CRON, USERNAME_SYNC_TIMEZONE } from './config.js';
 import { handleWalletInput, handleWalletFinalSave } from './handlers/walletHandler.js';
 import { handleAdminPaymentAction, handleProductDelivery, handleDeliveryReply, handleReplyToAdmin } from './handlers/paymentHandler.js';
 import { handlePokeCommand, handlePokeInput } from './handlers/pokeHandler.js';
@@ -378,6 +380,7 @@ bot.onText(/^\/(addcategory|addsubcategory|addproduct)(.*)/, (msg) => {
 });
 bot.onText(/\/cocktail/, (msg) => handleAdminCommand(bot, msg));
 bot.onText(/\/poke/, (msg) => handlePokeCommand(bot, msg));
+bot.onText(/\/merger/, (msg) => usernameNormalizer.handleMergerCommand(bot, msg));
 
 // News and announcements command (restricted to admins)
 bot.onText(/\/news/, (msg) => handleNewsCommand(bot, msg));
@@ -398,7 +401,13 @@ bot.onText(/\/sidekick/, async (msg) => {
 // This handler is moved to the main message handler below
 setupDailyWalletPrompt(bot);
 
-
+// Initialize daily username normalization sync
+if (USERNAME_SYNC_ENABLED) {
+  usernameNormalizer.setupDailySync(bot, USERNAME_SYNC_CRON, USERNAME_SYNC_TIMEZONE);
+  logger.info('SYSTEM', `Username sync scheduled: ${USERNAME_SYNC_CRON} (${USERNAME_SYNC_TIMEZONE})`);
+} else {
+  logger.info('SYSTEM', 'Username sync is DISABLED via env');
+}
 
 // === CALLBACKS ===
 const callbackCooldowns = new Map();
