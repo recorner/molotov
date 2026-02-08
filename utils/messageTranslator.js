@@ -132,6 +132,10 @@ class MessageTranslator {
       'btn_back_to_order': 'Back to Order',
       'btn_guide': 'Guide',
       'btn_cancel': 'Cancel',
+      'btn_i_sent_payment': 'I Sent Payment',
+      'btn_copy_address': 'Copy Address',
+      'btn_back_to_store': 'Back to Store',
+      'payment_page_title': '{currency} Payment',
       
       // ═══ Payment confirmation & processing ═══
       'payment_processing_title': 'Payment Processing',

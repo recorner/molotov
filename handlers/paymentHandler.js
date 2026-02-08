@@ -146,37 +146,44 @@ export async function handlePaymentSelection(bot, query) {
     const currencyEmoji = currency === 'btc' ? '₿' : '🪙';
     const currencyName = currency === 'btc' ? 'Bitcoin' : 'Litecoin';
     
-    // Get translations for payment instructions
-    const paymentInstructions = await messageTranslator.translateTemplateForUser('payment_instructions', from.id);
-    const orderIdLabel = await messageTranslator.translateTemplateForUser('order_id', from.id);
-    const productLabel = await messageTranslator.translateTemplateForUser('product_label', from.id);
-    const amountLabel = await messageTranslator.translateTemplateForUser('amount_label', from.id);
-    const currencyLabel = await messageTranslator.translateTemplateForUser('currency_label', from.id);
-    const sendPaymentTo = await messageTranslator.translateTemplateForUser('send_payment_to', from.id);
-    const importantLabel = await messageTranslator.translateTemplateForUser('important_label', from.id);
-    const sendExactly = await messageTranslator.translateTemplateForUser('send_exactly', from.id);
-    const doubleCheck = await messageTranslator.translateTemplateForUser('double_check_address', from.id);
-    const confirmTime = await messageTranslator.translateTemplateForUser('confirmation_time', from.id);
-    const keepTxId = await messageTranslator.translateTemplateForUser('keep_transaction_id', from.id);
-    const afterSending = await messageTranslator.translateTemplateForUser('after_sending_payment', from.id);
+    // Get ALL translations for payment instructions page
+    const [
+      paymentTitle, addressTitle, tapToCopy, quickStepsTitle,
+      stepSendExact, stepUseAddress, stepClickSent, autoDelivery,
+      btnSentPayment, btnCopyAddress, btnCheckStatus, btnCancel, btnBackToStore
+    ] = await Promise.all([
+      messageTranslator.translateTemplateForUser('payment_page_title', from.id, { currency: currencyName }),
+      messageTranslator.translateTemplateForUser('payment_address_title', from.id),
+      messageTranslator.translateTemplateForUser('tap_to_copy_prefix', from.id),
+      messageTranslator.translateTemplateForUser('quick_steps_title', from.id),
+      messageTranslator.translateTemplateForUser('step_send_exact', from.id),
+      messageTranslator.translateTemplateForUser('step_use_address', from.id),
+      messageTranslator.translateTemplateForUser('step_click_sent', from.id),
+      messageTranslator.translateTemplateForUser('auto_delivery_notice', from.id),
+      messageTranslator.translateTemplateForUser('btn_i_sent_payment', from.id),
+      messageTranslator.translateTemplateForUser('btn_copy_address', from.id),
+      messageTranslator.translateTemplateForUser('btn_check_status', from.id),
+      messageTranslator.translateTemplateForUser('btn_cancel', from.id),
+      messageTranslator.translateTemplateForUser('btn_back_to_store', from.id),
+    ]);
     
-    // Create beautiful, concise payment instructions
+    // Create translated payment instructions
     const content = 
       `**💰 ${uiOptimizer.formatPrice(price)} ${currency.toUpperCase()}**\n` +
       `${product.name} • Order #${orderId}\n\n` +
       
-      `**� Payment Address**\n` +
-      `👆 **Tap to copy:** \`${address}\`\n\n` +
+      `**📍 ${addressTitle}**\n` +
+      `👆 **${tapToCopy}** \`${address}\`\n\n` +
       
-      `**⚡ Quick Steps**\n` +
-      `1️⃣ Send exact amount above\n` +
-      `2️⃣ Use address above (tap to copy)\n` +
-      `3️⃣ Click "Payment Sent" below\n\n` +
+      `**⚡ ${quickStepsTitle}**\n` +
+      `1️⃣ ${stepSendExact}\n` +
+      `2️⃣ ${stepUseAddress}\n` +
+      `3️⃣ ${stepClickSent}\n\n` +
       
-      `� **Auto-delivery in 5-15 minutes**`;
+      `📦 **${autoDelivery}**`;
 
     const messageText = uiOptimizer.formatMessage(
-      `💳 ${currencyEmoji} ${currencyName} Payment`,
+      `💳 ${currencyEmoji} ${paymentTitle}`,
       content,
       { 
         style: 'compact',
@@ -185,15 +192,15 @@ export async function handlePaymentSelection(bot, query) {
       }
     );
 
-    // Create mobile-optimized payment buttons with better spacing
+    // Create translated payment buttons
     const paymentButtons = [
-      [{ text: `✅ I Sent Payment`, callback_data: `confirm_${orderId}` }],
-      [{ text: `📋 Copy Address`, callback_data: `copy_address_${address}` }],
+      [{ text: `✅ ${btnSentPayment}`, callback_data: `confirm_${orderId}` }],
+      [{ text: `📋 ${btnCopyAddress}`, callback_data: `copy_address_${address}` }],
       [
-        { text: `🔍 Check Status`, callback_data: `status_${orderId}` },
-        { text: `❌ Cancel`, callback_data: `cancel_order_${orderId}` }
+        { text: `🔍 ${btnCheckStatus}`, callback_data: `status_${orderId}` },
+        { text: `❌ ${btnCancel}`, callback_data: `cancel_order_${orderId}` }
       ],
-      [{ text: `🏪 Back to Store`, callback_data: 'load_categories' }]
+      [{ text: `🏪 ${btnBackToStore}`, callback_data: 'load_categories' }]
     ];
 
     // Show payment instructions with banner for professional payment experience - use smart editing
