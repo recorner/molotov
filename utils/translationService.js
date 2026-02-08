@@ -1,6 +1,9 @@
 // utils/translationService.js - Multi-language translation service (env-driven)
 import logger from './logger.js';
 import db from '../database.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import {
   ENABLED_LANGUAGES,
   DEFAULT_LANGUAGE,
@@ -9,6 +12,9 @@ import {
   PRELOAD_TRANSLATIONS
 } from '../config.js';
 import libreTranslateManager from './libreTranslateManager.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 class TranslationService {
   constructor() {
@@ -393,6 +399,130 @@ class TranslationService {
     const recompileOk = await libreTranslateManager.removeLanguage(code);
 
     return { success: true, recompiled: recompileOk };
+  }
+
+  /**
+   * Build all translations, save to disk, load into memory + Redis.
+   * This is the "one-stop" method called after language changes
+   * and on startup if translations don't exist yet.
+   * 
+   * Requires: messageTranslator (lazy-imported), instantTranslationService (lazy-imported)
+   */
+  async buildAndLoadTranslations() {
+    const startTime = Date.now();
+    const outputDir = path.join(__dirname, '../generated/translations');
+
+    // Ensure output directory
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    // Lazy-import to avoid circular dependency
+    const { default: messageTranslator } = await import('../utils/messageTranslator.js');
+    const { default: instantTranslationService } = await import('../utils/instantTranslationService.js');
+
+    // 1. Ensure LibreTranslate connection
+    await this.testConnection();
+
+    // 2. Get all templates
+    const templates = messageTranslator.getTemplates();
+    const templateKeys = Object.keys(templates);
+    const targetLanguages = this.enabledCodes.filter(c => c !== 'en');
+
+    logger.info('TRANSLATION', `Building translations: ${templateKeys.length} templates × ${targetLanguages.length} languages`);
+
+    // 3. Build translations
+    const translationsData = { en: { ...templates } };
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const lang of targetLanguages) {
+      translationsData[lang] = {};
+
+      for (const key of templateKeys) {
+        const text = templates[key];
+        try {
+          const translated = await Promise.race([
+            this.translate(text, lang),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000))
+          ]);
+          if (translated && translated !== text && translated.length > 0) {
+            translationsData[lang][key] = translated;
+            successCount++;
+          } else {
+            translationsData[lang][key] = text;
+            failCount++;
+          }
+        } catch {
+          translationsData[lang][key] = text;
+          failCount++;
+        }
+        // Small delay to avoid overwhelming LibreTranslate
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+
+      const eff = Math.round((successCount / (successCount + failCount)) * 100);
+      logger.info('TRANSLATION', `Built ${lang}: ${successCount} ok, ${failCount} fail (${eff}%)`);
+    }
+
+    // 4. Save to disk
+    try {
+      const allPath = path.join(outputDir, 'all.json');
+      await fs.promises.writeFile(allPath, JSON.stringify(translationsData, null, 2), 'utf8');
+
+      for (const [lang, data] of Object.entries(translationsData)) {
+        await fs.promises.writeFile(
+          path.join(outputDir, `${lang}.json`),
+          JSON.stringify(data, null, 2), 'utf8'
+        );
+      }
+
+      const metadata = {
+        buildTime: new Date().toISOString(),
+        totalTemplates: templateKeys.length,
+        totalLanguages: this.enabledCodes.length,
+        successfulTranslations: successCount,
+        failedTranslations: failCount,
+        efficiency: Math.round((successCount / Math.max(successCount + failCount, 1)) * 100),
+        buildDuration: Date.now() - startTime,
+        supportedLanguages: targetLanguages
+      };
+      await fs.promises.writeFile(
+        path.join(outputDir, 'metadata.json'),
+        JSON.stringify(metadata, null, 2), 'utf8'
+      );
+      logger.info('TRANSLATION', `Saved translation files to ${outputDir}`);
+    } catch (err) {
+      logger.error('TRANSLATION', `Failed to save translation files: ${err.message}`);
+    }
+
+    // 5. Load into memory (preloadedUI)
+    const preloadedCount = this.loadPrebuiltData(translationsData);
+
+    // 6. Preload UI translations (fallback + live)
+    const uiTemplates = messageTranslator.getTemplates();
+    await this.preloadAllUITranslations(uiTemplates);
+
+    // 7. Load into Redis
+    let redisOk = false;
+    try {
+      await instantTranslationService.preloadTranslationsToRedis(translationsData);
+      redisOk = true;
+      logger.info('TRANSLATION', 'Translations loaded into Redis');
+    } catch (err) {
+      logger.warn('TRANSLATION', `Redis load failed (non-fatal): ${err.message}`);
+    }
+
+    const duration = Date.now() - startTime;
+    logger.info('TRANSLATION', `Build & load complete in ${duration}ms: ${successCount} ok, ${failCount} fail, Redis: ${redisOk}`);
+
+    return {
+      preloaded: preloadedCount,
+      built: successCount,
+      failed: failCount,
+      redis: redisOk,
+      duration
+    };
   }
 
   /**

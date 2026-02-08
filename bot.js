@@ -68,6 +68,7 @@ import {
 import { handleAdminCommand } from './handlers/adminHandler.js';
 import { handleAdminCallback } from './handlers/adminHandler.js';
 import { handleNewsCommand } from './handlers/newsHandler.js';
+import { handleLingoCommand, handleLingoCallback } from './handlers/lingoHandler.js';
 import adminManager from './utils/adminManager.js';
 
 // Initialize bot with production settings
@@ -131,7 +132,20 @@ async function initializeBot() {
       const stats = prebuiltTranslations.getStats();
       logger.info('SYSTEM', `Translation system ready: ${stats.cacheSize} entries loaded`);
     } else {
-      logger.warn('SYSTEM', 'Pre-built translations not available, using live translation + fallbacks');
+      // Pre-built translations don't exist — build them now if LibreTranslate is available
+      if (libreReady) {
+        logger.info('SYSTEM', 'Pre-built translations not found. Building now (this may take 30-60s)...');
+        try {
+          const buildResult = await translationService.buildAndLoadTranslations();
+          logger.info('SYSTEM', `Auto-built translations: ${buildResult.built} ok, ${buildResult.failed} fail, Redis: ${buildResult.redis}`);
+          console.log(`[✅] Translations auto-built: ${buildResult.built} entries in ${buildResult.duration}ms`);
+        } catch (buildErr) {
+          logger.warn('SYSTEM', `Auto-build failed (non-fatal): ${buildErr.message}`);
+          console.log('[⚠️] Translation auto-build failed - using live translation + fallbacks');
+        }
+      } else {
+        logger.warn('SYSTEM', 'Pre-built translations not available and LibreTranslate offline - using fallbacks only');
+      }
     }
     
     // Log translation service stats
@@ -415,6 +429,9 @@ bot.onText(/\/demote/, (msg) => adminManager.handleDemoteCommand(bot, msg));
 // News and announcements command (restricted to admins)
 bot.onText(/\/news/, (msg) => handleNewsCommand(bot, msg));
 
+// Language management command (restricted to admins)
+bot.onText(/\/lingo/, (msg) => handleLingoCommand(bot, msg));
+
 bot.onText(/\/sidekick/, async (msg) => {
   // Quick access to sidekick - use dynamic admin check
   const isUserAdmin = await adminManager.isAdmin(msg.from.id);
@@ -474,6 +491,11 @@ bot.on('callback_query', async (query) => {
       if (now - timestamp > 300000) {
         callbackCooldowns.delete(key);
       }
+    }
+
+    // LINGO LANGUAGE MANAGEMENT (must come before lang_ handlers)
+    if (data.startsWith('lingo_')) {
+      return handleLingoCallback(bot, query);
     }
 
     // ADMIN LANGUAGE MANAGEMENT (must come before general lang_ handler)
