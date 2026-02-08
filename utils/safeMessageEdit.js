@@ -98,12 +98,15 @@ export async function safeEditMessageReplyMarkup(bot, chatId, messageId, replyMa
  * @param {Object} options - Message options
  */
 export async function replaceMessage(bot, chatId, messageId, type, content, options = {}) {
+  // Try to delete the old message first (non-critical)
   try {
-    // First, delete the old message
     await bot.deleteMessage(chatId, messageId);
-    console.log('[Safe Edit] Old message deleted successfully');
-    
-    // Then send new message based on type
+  } catch {
+    // Deletion failure is ok, we still send the new message
+  }
+
+  // Send replacement message
+  try {
     if (type === 'photo') {
       return await bot.sendPhoto(chatId, content, {
         caption: options.caption || '',
@@ -116,27 +119,25 @@ export async function replaceMessage(bot, chatId, messageId, type, content, opti
         reply_markup: options.reply_markup
       });
     }
-  } catch (fallbackError) {
-    console.error('[Safe Edit Replace Error]', fallbackError.message);
-    
-    // If deletion fails, still try to send the new message
+  } catch (error) {
+    // If send fails (likely markdown parse error), retry without parse_mode
+    logger.warn('SAFE_EDIT', `replaceMessage failed, retrying without Markdown: ${error.message}`);
     try {
-      console.log('[Safe Edit] Deletion failed, sending new message anyway');
+      const plainCaption = (options.caption || '').replace(/[*_`\[\]()~]/g, '');
+      const plainContent = typeof content === 'string' ? content.replace(/[*_`\[\]()~]/g, '') : content;
       if (type === 'photo') {
         return await bot.sendPhoto(chatId, content, {
-          caption: options.caption || '',
-          parse_mode: options.parse_mode || 'Markdown',
+          caption: plainCaption,
           reply_markup: options.reply_markup
         });
       } else {
-        return await bot.sendMessage(chatId, content, {
-          parse_mode: options.parse_mode || 'Markdown',
+        return await bot.sendMessage(chatId, plainContent, {
           reply_markup: options.reply_markup
         });
       }
-    } catch (sendError) {
-      console.error('[Safe Edit Send Error]', sendError.message);
-      throw sendError;
+    } catch (e2) {
+      logger.error('SAFE_EDIT', `replaceMessage final fallback failed: ${e2.message}`);
+      throw e2;
     }
   }
 }

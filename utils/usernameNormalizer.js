@@ -50,6 +50,47 @@ class UsernameNormalizer {
     });
   }
 
+  _getFullUser(telegramId) {
+    return new Promise((resolve, reject) => {
+      db.get(
+        'SELECT * FROM users WHERE telegram_id = ?',
+        [telegramId],
+        (err, row) => (err ? reject(err) : resolve(row || null))
+      );
+    });
+  }
+
+  /**
+   * Archive a user to the removed_users_ledger before deleting them.
+   * Preserves all original data for future reference.
+   */
+  async _archiveToLedger(telegramId, category, reason, apiErrorMsg = null) {
+    const user = await this._getFullUser(telegramId);
+    if (!user) return; // Already gone
+
+    return new Promise((resolve, reject) => {
+      db.run(
+        `INSERT INTO removed_users_ledger
+          (telegram_id, username, first_name, last_name, language_code,
+           original_created_at, last_activity, removal_reason, removal_category, api_error_message)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          user.telegram_id,
+          user.username || null,
+          user.first_name || null,
+          user.last_name || null,
+          user.language_code || null,
+          user.created_at || null,
+          user.last_activity || null,
+          reason,
+          category,
+          apiErrorMsg
+        ],
+        function (err) { err ? reject(err) : resolve(this.lastID); }
+      );
+    });
+  }
+
   _sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
   }
@@ -73,13 +114,13 @@ class UsernameNormalizer {
   /**
    * Classify a Telegram API error to decide what action to take.
    *
-   * CRITICAL RULES:
-   *   "user is deactivated"  → account is genuinely gone     → DELETE
-   *   "chat not found"       → bot can't resolve, user exists → KEEP (skip)
-   *   "bot was blocked"      → real user, blocked the bot     → KEEP (skip)
-   *   "PEER_ID_INVALID"      → bot never interacted           → KEEP (skip)
-   *   "user not found"       → can't resolve                  → KEEP (skip)
-   *   anything else          → unknown                        → KEEP (skip)
+   * STRICT POLICY — only confirmed-reachable users stay:
+   *   "user is deactivated"  → account is genuinely gone     → ARCHIVE + DELETE
+   *   "chat not found"       → bot can't resolve the user    → ARCHIVE + DELETE
+   *   "bot was blocked"      → user blocked the bot           → ARCHIVE + DELETE
+   *   "PEER_ID_INVALID"      → bot never interacted           → ARCHIVE + DELETE
+   *   "user not found"       → can't resolve                  → ARCHIVE + DELETE
+   *   anything else          → transient / unknown            → KEEP (skip)
    */
   _classifyError(errMsg) {
     const msg = (errMsg || '').toLowerCase();
@@ -112,14 +153,17 @@ class UsernameNormalizer {
     const remaining = totalUsers - results.checked;
     const etaSec = rate > 0 ? Math.round(remaining / rate) : '??';
 
+    const totalArchived = results.deletedAccounts.length + results.unreachable.length + results.blocked.length;
     const lines = [
       `🔄 *Username Sync In Progress...*\n`,
       `${bar}  ${pct}%`,
       `📊 ${results.checked} / ${totalUsers} users checked`,
+      `✅ ${results.confirmed} confirmed reachable`,
       `✏️ ${results.usernameUpdated.length} usernames updated`,
-      `🗑️ ${results.deletedAccounts.length} deleted accounts removed`,
-      `⚠️ ${results.unreachable.length} unreachable (skipped)`,
-      `🚫 ${results.blocked.length} blocked bot (skipped)`,
+      `📦 ${totalArchived} archived to ledger:`,
+      `  🗑️ ${results.deletedAccounts.length} deleted`,
+      `  🔇 ${results.unreachable.length} unreachable`,
+      `  🚫 ${results.blocked.length} blocked`,
       `⏱️ Elapsed: ${elapsedSec}s | ETA: ~${etaSec}s`
     ];
     return lines.join('\n');
@@ -135,6 +179,7 @@ class UsernameNormalizer {
 
       // ── Deleted account (successful API response but marked deleted) ──
       if (this._isChatDeleted(chat)) {
+        await this._archiveToLedger(user.telegram_id, 'deleted', 'Deleted / deactivated account (API confirmed)');
         await this._deleteUser(user.telegram_id);
         results.deletedAccounts.push({
           telegramId: user.telegram_id,
@@ -142,9 +187,12 @@ class UsernameNormalizer {
           firstName: user.first_name || 'N/A',
           reason: 'Deleted / deactivated account'
         });
-        logger.info('USERNAME_SYNC', `Removed deleted account: ${user.telegram_id} (@${user.username || 'none'})`);
+        logger.info('USERNAME_SYNC', `Archived & removed deleted account: ${user.telegram_id} (@${user.username || 'none'})`);
         return;
       }
+
+      // ── User is confirmed reachable — mark as verified ──
+      results.confirmed++;
 
       // ── Username change detection ──
       const currentUsername = chat.username || null;
@@ -174,6 +222,7 @@ class UsernameNormalizer {
 
       switch (classification) {
         case 'deleted':
+          await this._archiveToLedger(user.telegram_id, 'deleted', 'Account deactivated', errMsg);
           await this._deleteUser(user.telegram_id);
           results.deletedAccounts.push({
             telegramId: user.telegram_id,
@@ -181,31 +230,36 @@ class UsernameNormalizer {
             firstName: user.first_name || 'N/A',
             reason: errMsg
           });
-          logger.info('USERNAME_SYNC', `Removed deactivated account: ${user.telegram_id} (${errMsg})`);
+          logger.info('USERNAME_SYNC', `Archived & removed deactivated account: ${user.telegram_id} (${errMsg})`);
           break;
 
         case 'unreachable':
+          await this._archiveToLedger(user.telegram_id, 'unreachable', 'Chat not found / unresolvable', errMsg);
+          await this._deleteUser(user.telegram_id);
           results.unreachable.push({
             telegramId: user.telegram_id,
             username: user.username || 'N/A',
             firstName: user.first_name || 'N/A',
             reason: errMsg
           });
-          logger.debug('USERNAME_SYNC', `User unreachable (kept): ${user.telegram_id} — ${errMsg}`);
+          logger.info('USERNAME_SYNC', `Archived & removed unreachable user: ${user.telegram_id} — ${errMsg}`);
           break;
 
         case 'blocked':
+          await this._archiveToLedger(user.telegram_id, 'blocked', 'User blocked the bot', errMsg);
+          await this._deleteUser(user.telegram_id);
           results.blocked.push({
             telegramId: user.telegram_id,
             username: user.username || 'N/A',
             firstName: user.first_name || 'N/A'
           });
-          logger.debug('USERNAME_SYNC', `User blocked bot (kept): ${user.telegram_id}`);
+          logger.info('USERNAME_SYNC', `Archived & removed blocked user: ${user.telegram_id}`);
           break;
 
         default:
+          // Transient / unknown errors — keep the user, don't archive
           results.errors.push({ telegramId: user.telegram_id, error: errMsg });
-          logger.error('USERNAME_SYNC', `Unexpected error for ${user.telegram_id}: ${errMsg}`);
+          logger.error('USERNAME_SYNC', `Transient error (user kept): ${user.telegram_id}: ${errMsg}`);
           break;
       }
     } finally {
@@ -233,12 +287,13 @@ class UsernameNormalizer {
     const results = {
       totalUsers: 0,
       checked: 0,
+      confirmed: 0,       // users confirmed reachable — the ONLY ones kept
       usernameUpdated: [],
-      deletedAccounts: [],
+      deletedAccounts: [], // archived + removed
       noUsername: [],
-      unreachable: [],   // "chat not found" — kept in DB
-      blocked: [],       // "bot was blocked" — kept in DB
-      errors: [],
+      unreachable: [],     // archived + removed (chat not found)
+      blocked: [],         // archived + removed (bot was blocked)
+      errors: [],          // transient errors — users kept
       duration: 0
     };
 
@@ -289,9 +344,11 @@ class UsernameNormalizer {
 
       logger.info('USERNAME_SYNC',
         `Normalization complete in ${(results.duration / 1000).toFixed(1)}s — ` +
-        `checked: ${results.checked}, updated: ${results.usernameUpdated.length}, ` +
-        `deleted: ${results.deletedAccounts.length}, unreachable: ${results.unreachable.length}, ` +
-        `blocked: ${results.blocked.length}, errors: ${results.errors.length}`
+        `checked: ${results.checked}, confirmed: ${results.confirmed}, ` +
+        `updated: ${results.usernameUpdated.length}, ` +
+        `archived: ${results.deletedAccounts.length + results.unreachable.length + results.blocked.length} ` +
+        `(deleted: ${results.deletedAccounts.length}, unreachable: ${results.unreachable.length}, ` +
+        `blocked: ${results.blocked.length}), errors: ${results.errors.length}`
       );
 
       return results;
@@ -311,13 +368,16 @@ class UsernameNormalizer {
 
   formatReport(results) {
     const duration = (results.duration / 1000).toFixed(1);
+    const totalArchived = results.deletedAccounts.length + results.unreachable.length + results.blocked.length;
     const lines = [];
 
     lines.push(`🔄 *Username Sync Report*\n`);
     lines.push(`━━━━━━━━━━━━━━━━━━━━━`);
     lines.push(`📊 *Overview*`);
     lines.push(`• Total users scanned: ${results.totalUsers}`);
-    lines.push(`• Successfully checked: ${results.checked}`);
+    lines.push(`• Confirmed reachable: ✅ ${results.confirmed}`);
+    lines.push(`• Archived to ledger: 📦 ${totalArchived}`);
+    lines.push(`• Transient errors (kept): ${results.errors.length}`);
     lines.push(`• Duration: ${duration}s\n`);
 
     // Updated usernames
@@ -332,9 +392,9 @@ class UsernameNormalizer {
       lines.push('');
     }
 
-    // Deleted accounts (only truly confirmed ones)
+    // Deleted accounts (archived to ledger)
     if (results.deletedAccounts.length > 0) {
-      lines.push(`🗑️ *Removed Accounts (${results.deletedAccounts.length})*`);
+      lines.push(`🗑️ *Deleted Accounts → Ledger (${results.deletedAccounts.length})*`);
       for (const d of results.deletedAccounts.slice(0, 15)) {
         lines.push(`  • \`${d.telegramId}\` @${d.username} — ${d.reason}`);
       }
@@ -344,11 +404,11 @@ class UsernameNormalizer {
       lines.push('');
     }
 
-    // Unreachable (kept — not deleted)
+    // Unreachable (archived to ledger)
     if (results.unreachable.length > 0) {
-      lines.push(`🔇 *Unreachable — kept in DB (${results.unreachable.length})*`);
+      lines.push(`🔇 *Unreachable → Ledger (${results.unreachable.length})*`);
       for (const u of results.unreachable.slice(0, 10)) {
-        lines.push(`  • \`${u.telegramId}\` @${u.username}`);
+        lines.push(`  • \`${u.telegramId}\` @${u.username} — ${u.reason}`);
       }
       if (results.unreachable.length > 10) {
         lines.push(`  _…and ${results.unreachable.length - 10} more_`);
@@ -356,9 +416,9 @@ class UsernameNormalizer {
       lines.push('');
     }
 
-    // Blocked
+    // Blocked (archived to ledger)
     if (results.blocked.length > 0) {
-      lines.push(`🚫 *Blocked Bot — kept in DB (${results.blocked.length})*`);
+      lines.push(`🚫 *Blocked Bot → Ledger (${results.blocked.length})*`);
       for (const b of results.blocked.slice(0, 10)) {
         lines.push(`  • \`${b.telegramId}\` @${b.username}`);
       }
@@ -368,9 +428,9 @@ class UsernameNormalizer {
       lines.push('');
     }
 
-    // No username
+    // No username (still confirmed reachable, kept in DB)
     if (results.noUsername.length > 0) {
-      lines.push(`⚠️ *No Username Set (${results.noUsername.length})*`);
+      lines.push(`⚠️ *No Username Set — kept (${results.noUsername.length})*`);
       for (const n of results.noUsername.slice(0, 10)) {
         lines.push(`  • \`${n.telegramId}\` (${n.firstName})`);
       }
@@ -380,9 +440,9 @@ class UsernameNormalizer {
       lines.push('');
     }
 
-    // Errors
+    // Errors (transient — users kept)
     if (results.errors.length > 0) {
-      lines.push(`❌ *Errors (${results.errors.length})*`);
+      lines.push(`❌ *Transient Errors — kept (${results.errors.length})*`);
       for (const e of results.errors.slice(0, 5)) {
         lines.push(`  • \`${e.telegramId}\` — ${e.error}`);
       }
@@ -395,11 +455,15 @@ class UsernameNormalizer {
     // All clean
     if (
       results.usernameUpdated.length === 0 &&
-      results.deletedAccounts.length === 0 &&
+      totalArchived === 0 &&
       results.noUsername.length === 0 &&
       results.errors.length === 0
     ) {
-      lines.push(`✅ *All users are up to date — no changes needed.*`);
+      lines.push(`✅ *All users are confirmed & up to date — no changes needed.*`);
+    }
+
+    if (totalArchived > 0) {
+      lines.push(`💡 _Archived users are saved in the ledger for future reference._`);
     }
 
     lines.push(`━━━━━━━━━━━━━━━━━━━━━`);
@@ -527,6 +591,113 @@ class UsernameNormalizer {
     // Cross-post to admin group if command wasn't run there
     if (ADMIN_GROUP && chatId !== ADMIN_GROUP) {
       await this.notifyAdmins(bot, results);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  Ledger queries — view archived users
+  // ═══════════════════════════════════════════════════════════════════════
+
+  _getLedgerStats() {
+    return new Promise((resolve, reject) => {
+      db.all(
+        `SELECT removal_category,
+                COUNT(*) as count,
+                MAX(removed_at) as last_removed
+         FROM removed_users_ledger
+         WHERE restored_at IS NULL
+         GROUP BY removal_category`,
+        [],
+        (err, rows) => (err ? reject(err) : resolve(rows || []))
+      );
+    });
+  }
+
+  _getLedgerEntries(category = null, limit = 20) {
+    const where = category ? 'WHERE removal_category = ? AND restored_at IS NULL' : 'WHERE restored_at IS NULL';
+    const params = category ? [category, limit] : [limit];
+    return new Promise((resolve, reject) => {
+      db.all(
+        `SELECT * FROM removed_users_ledger ${where} ORDER BY removed_at DESC LIMIT ?`,
+        params,
+        (err, rows) => (err ? reject(err) : resolve(rows || []))
+      );
+    });
+  }
+
+  _getLedgerTotal() {
+    return new Promise((resolve, reject) => {
+      db.get(
+        'SELECT COUNT(*) as total FROM removed_users_ledger WHERE restored_at IS NULL',
+        [],
+        (err, row) => (err ? reject(err) : resolve(row?.total || 0))
+      );
+    });
+  }
+
+  /**
+   * /ledger command — display archived users summary
+   */
+  async handleLedgerCommand(bot, msg) {
+    const userId = msg.from.id;
+    const chatId = msg.chat.id;
+
+    const adminManager = (await import('./adminManager.js')).default;
+    const isAdmin = await adminManager.isAdmin(userId);
+    if (!isAdmin) {
+      return bot.sendMessage(chatId, '⛔ This command is restricted to administrators.');
+    }
+
+    try {
+      const [stats, total] = await Promise.all([
+        this._getLedgerStats(),
+        this._getLedgerTotal()
+      ]);
+
+      const lines = [];
+      lines.push(`📦 *Removed Users Ledger*\n`);
+      lines.push(`━━━━━━━━━━━━━━━━━━━━━`);
+      lines.push(`📊 *Total archived: ${total}*\n`);
+
+      if (stats.length === 0) {
+        lines.push(`✅ Ledger is empty — no users have been removed yet.`);
+      } else {
+        const icons = { deleted: '🗑️', unreachable: '🔇', blocked: '🚫' };
+        for (const row of stats) {
+          const icon = icons[row.removal_category] || '❓';
+          const lastDate = row.last_removed ? new Date(row.last_removed).toLocaleDateString() : 'N/A';
+          lines.push(`${icon} *${row.removal_category}*: ${row.count} users (last: ${lastDate})`);
+        }
+
+        lines.push('');
+
+        // Show recent entries
+        const recent = await this._getLedgerEntries(null, 10);
+        if (recent.length > 0) {
+          lines.push(`\n📋 *Recent Removals (last 10)*`);
+          for (const entry of recent) {
+            const date = new Date(entry.removed_at).toLocaleDateString();
+            const cat = entry.removal_category;
+            const icon = icons[cat] || '❓';
+            lines.push(`  ${icon} \`${entry.telegram_id}\` @${entry.username || 'none'} — ${cat} (${date})`);
+          }
+        }
+      }
+
+      lines.push(`\n━━━━━━━━━━━━━━━━━━━━━`);
+      lines.push(`💡 _Users are archived here when removed by /merger sync._`);
+      lines.push(`_Only users confirmed reachable by the bot stay in the active DB._`);
+      lines.push(`🕒 ${new Date().toLocaleString()}`);
+
+      let text = lines.join('\n');
+      if (text.length > 4000) {
+        text = text.substring(0, 3950) + '\n\n_…report truncated_';
+      }
+
+      await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+    } catch (err) {
+      logger.error('LEDGER', 'Failed to generate ledger report', err);
+      await bot.sendMessage(chatId, '❌ Failed to retrieve ledger data. Check logs.');
     }
   }
 }

@@ -1,16 +1,5 @@
 #!/usr/bin/env node
-// scripts/build-translations  // Get templates and languages to process
-  getTemplatesAndLanguages() {
-    const templates = Object.keys(messageTranslator.messageTemplates);
-    // Use configured languages from environment, always include English
-    const languages = ['en', ...this.supportedLanguages];
-    
-    this.stats.totalTemplates = templates.length;
-    this.stats.totalLanguages = languages.length;
-    
-    console.log(`📊 Found ${templates.length} templates for ${languages.length} languages`);
-    return { templates, languages };
-  }d-time translation generator
+// scripts/build-translations.js - Build-time translation generator
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -26,7 +15,9 @@ class TranslationBuilder {
   constructor() {
     this.outputDir = path.join(__dirname, '../generated/translations');
     this.translationsData = {};
-    this.supportedLanguages = this.getSupportedLanguagesFromEnv();
+    // Use enabled languages from translationService (reads ENABLED_LANGUAGES from .env)
+    this.supportedLanguages = translationService.getEnabledCodes().filter(c => c !== 'en');
+    // Note: call translationBuilder.init() before building to connect LibreTranslate
     this.stats = {
       totalTemplates: 0,
       totalLanguages: 0,
@@ -34,20 +25,7 @@ class TranslationBuilder {
       failedTranslations: 0,
       startTime: Date.now()
     };
-  }
-
-  // Get supported languages from environment
-  getSupportedLanguagesFromEnv() {
-    const envLanguages = process.env.SUPPORTED_LANGUAGES;
-    
-    if (!envLanguages) {
-      console.warn('⚠️ SUPPORTED_LANGUAGES not set in environment, using default languages');
-      return ['es', 'fr', 'de', 'it', 'pt', 'ru', 'zh', 'ja'];
-    }
-
-    const languages = envLanguages.split(',').map(lang => lang.trim()).filter(lang => lang);
-    console.log(`📋 Building translations for configured languages: ${languages.join(', ')}`);
-    return languages;
+    console.log(`📋 Building translations for: ${this.supportedLanguages.join(', ')}`);
   }
 
   // Ensure output directory exists
@@ -61,11 +39,12 @@ class TranslationBuilder {
   // Get all template keys and languages
   getTemplatesAndLanguages() {
     const templates = Object.keys(messageTranslator.messageTemplates);
-    const languages = Object.keys(translationService.getSupportedLanguages());
+    const languages = ['en', ...this.supportedLanguages];
     
     this.stats.totalTemplates = templates.length;
     this.stats.totalLanguages = languages.length;
     
+    console.log(`📊 Found ${templates.length} templates for ${languages.length} languages`);
     return { templates, languages };
   }
 
@@ -76,19 +55,16 @@ class TranslationBuilder {
 
     const { templates, languages } = this.getTemplatesAndLanguages();
     
-    // Initialize translations data structure
     for (const lang of languages) {
       this.translationsData[lang] = {};
     }
 
-    // English is the source language - just copy templates
     console.log('📋 Processing English (source language)...');
     for (const templateKey of templates) {
       this.translationsData.en[templateKey] = messageTranslator.messageTemplates[templateKey];
     }
     this.stats.successfulTranslations += templates.length;
 
-    // Process other languages
     const targetLanguages = languages.filter(lang => lang !== 'en');
     console.log(`🌍 Processing ${targetLanguages.length} target languages...`);
 
@@ -97,12 +73,10 @@ class TranslationBuilder {
       await this.buildLanguageTranslations(language, templates);
     }
 
-    // Save all translations to files
     await this.saveTranslations();
     this.printStats();
   }
 
-  // Build translations for a specific language
   async buildLanguageTranslations(language, templates) {
     let successCount = 0;
     let failCount = 0;
@@ -112,7 +86,6 @@ class TranslationBuilder {
       const templateText = messageTranslator.messageTemplates[templateKey];
 
       try {
-        // Add small delay to avoid overwhelming the API
         if (i > 0 && i % 5 === 0) {
           await new Promise(resolve => setTimeout(resolve, 200));
         }
@@ -124,13 +97,11 @@ class TranslationBuilder {
           successCount++;
           this.stats.successfulTranslations++;
         } else {
-          // Fallback to English
           this.translationsData[language][templateKey] = templateText;
           failCount++;
           this.stats.failedTranslations++;
         }
 
-        // Progress indicator
         if ((i + 1) % 10 === 0) {
           const progress = Math.round(((i + 1) / templates.length) * 100);
           process.stdout.write(`\r   Progress: ${i + 1}/${templates.length} (${progress}%) - Success: ${successCount}, Failed: ${failCount}`);
@@ -138,7 +109,7 @@ class TranslationBuilder {
 
       } catch (error) {
         console.warn(`\n   ⚠️  Failed to translate "${templateKey}": ${error.message}`);
-        this.translationsData[language][templateKey] = templateText; // Fallback
+        this.translationsData[language][templateKey] = templateText;
         failCount++;
         this.stats.failedTranslations++;
       }
@@ -147,28 +118,20 @@ class TranslationBuilder {
     console.log(`\n   ✅ ${language.toUpperCase()}: ${successCount} successful, ${failCount} failed`);
   }
 
-  // Save translations to JSON files
   async saveTranslations() {
     console.log('\n💾 Saving translation files...');
 
-    // Save individual language files
     for (const [language, translations] of Object.entries(this.translationsData)) {
       const filename = `${language}.json`;
       const filepath = path.join(this.outputDir, filename);
-      
-      const content = JSON.stringify(translations, null, 2);
-      fs.writeFileSync(filepath, content, 'utf8');
-      
+      fs.writeFileSync(filepath, JSON.stringify(translations, null, 2), 'utf8');
       console.log(`   📄 Saved ${filename} (${Object.keys(translations).length} translations)`);
     }
 
-    // Save combined file for easy loading
     const combinedFilepath = path.join(this.outputDir, 'all.json');
-    const combinedContent = JSON.stringify(this.translationsData, null, 2);
-    fs.writeFileSync(combinedFilepath, combinedContent, 'utf8');
+    fs.writeFileSync(combinedFilepath, JSON.stringify(this.translationsData, null, 2), 'utf8');
     console.log(`   📦 Saved combined file: all.json`);
 
-    // Save metadata
     const metadata = {
       buildTime: new Date().toISOString(),
       buildDuration: Date.now() - this.stats.startTime,
@@ -176,13 +139,10 @@ class TranslationBuilder {
       languages: Object.keys(this.translationsData),
       templateCount: this.stats.totalTemplates
     };
-
-    const metadataFilepath = path.join(this.outputDir, 'metadata.json');
-    fs.writeFileSync(metadataFilepath, JSON.stringify(metadata, null, 2), 'utf8');
+    fs.writeFileSync(path.join(this.outputDir, 'metadata.json'), JSON.stringify(metadata, null, 2), 'utf8');
     console.log(`   📊 Saved metadata.json`);
   }
 
-  // Print build statistics
   printStats() {
     const duration = Date.now() - this.stats.startTime;
     const efficiency = Math.round((this.stats.successfulTranslations / (this.stats.successfulTranslations + this.stats.failedTranslations)) * 100);
@@ -200,20 +160,16 @@ class TranslationBuilder {
   }
 }
 
-// Main execution
 async function main() {
   try {
     console.log('🚀 Starting translation build process...\n');
     
-    // Test LibreTranslate connection first
     console.log('🔍 Testing LibreTranslate connection...');
-    try {
-      await translationService.translate('Hello', 'fr');
+    const libreOk = await translationService.testConnection();
+    if (libreOk) {
       console.log('✅ LibreTranslate connection successful\n');
-    } catch (error) {
-      console.error('❌ LibreTranslate connection failed:', error.message);
-      console.log('💡 Make sure LibreTranslate is running on localhost:5000');
-      process.exit(1);
+    } else {
+      console.log('⚠️ LibreTranslate unavailable - using fallback translations only\n');
     }
 
     const builder = new TranslationBuilder();
@@ -231,7 +187,6 @@ async function main() {
   }
 }
 
-// Run if this script is executed directly
 if (import.meta.url === `file://${process.argv[1]}`) {
   main();
 }

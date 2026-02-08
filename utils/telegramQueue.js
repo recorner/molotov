@@ -1,6 +1,7 @@
 // utils/telegramQueue.js - Redis-based message queue for Telegram rate limiting
 import Redis from 'ioredis';
 import logger from './logger.js';
+import db from '../database.js';
 
 class TelegramQueue {
   constructor() {
@@ -58,6 +59,56 @@ class TelegramQueue {
       logger.error('TELEGRAM_QUEUE', 'Failed to initialize queue', error);
       // Don't throw - allow the bot to continue without queue
       logger.warn('TELEGRAM_QUEUE', 'Queue will operate in fallback mode');
+    }
+  }
+
+  /**
+   * Archive a blocked user to the removed_users_ledger and delete from users table.
+   * Called in real-time when a 403 "bot was blocked" error is detected.
+   * @param {number} telegramId - The user's Telegram ID
+   */
+  async _archiveAndRemoveBlockedUser(telegramId) {
+    try {
+      // Fetch user before deleting
+      const user = await new Promise((resolve, reject) => {
+        db.get('SELECT * FROM users WHERE telegram_id = ?', [telegramId],
+          (err, row) => (err ? reject(err) : resolve(row || null)));
+      });
+
+      if (!user) return; // Already removed (e.g. by /merger)
+
+      // Archive to ledger
+      await new Promise((resolve, reject) => {
+        db.run(
+          `INSERT INTO removed_users_ledger
+            (telegram_id, username, first_name, last_name, language_code,
+             original_created_at, last_activity, removal_reason, removal_category, api_error_message)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            user.telegram_id,
+            user.username || null,
+            user.first_name || null,
+            user.last_name || null,
+            user.language_code || null,
+            user.created_at || null,
+            user.last_activity || null,
+            'User blocked the bot (detected during message send)',
+            'blocked',
+            '403 Forbidden: bot was blocked by the user'
+          ],
+          function (err) { err ? reject(err) : resolve(this.lastID); }
+        );
+      });
+
+      // Delete from users table
+      await new Promise((resolve, reject) => {
+        db.run('DELETE FROM users WHERE telegram_id = ?', [telegramId],
+          function (err) { err ? reject(err) : resolve(this.changes); });
+      });
+
+      logger.info('TELEGRAM_QUEUE', `Archived & removed blocked user ${telegramId} (@${user.username || 'none'}) to ledger`);
+    } catch (err) {
+      logger.error('TELEGRAM_QUEUE', `Failed to archive blocked user ${telegramId}`, err);
     }
   }
 
@@ -208,6 +259,8 @@ class TelegramQueue {
           let status = 'failed';
           if (error.code === 'ETELEGRAM' && error.response?.body?.error_code === 403) {
             status = 'skipped'; // User blocked bot
+            // Archive & remove blocked user from DB in real-time
+            this._archiveAndRemoveBlockedUser(messageData.chatId).catch(() => {});
           }
           
           // Record failed delivery
@@ -341,7 +394,11 @@ class TelegramQueue {
             ...messageData.options
           });
         } catch (photoError) {
-          // If photo fails, fallback to text message
+          // If 403 blocked, don't fallback — let outer catch handle archival
+          if (photoError.code === 'ETELEGRAM' && photoError.response?.body?.error_code === 403) {
+            throw photoError;
+          }
+          // If photo fails for other reasons, fallback to text message
           logger.warn('TELEGRAM_QUEUE', `Photo send failed for ${messageData.chatId}, fallback to text`, photoError);
           await bot.sendMessage(messageData.chatId, messageData.caption || messageData.text, messageData.options);
         }
@@ -363,8 +420,9 @@ class TelegramQueue {
         const errorCode = error.response?.body?.error_code;
         
         if (errorCode === 403) {
-          // User blocked bot - don't retry
-          logger.warn('TELEGRAM_QUEUE', `User ${messageData.chatId} blocked bot`);
+          // User blocked bot - don't retry, archive & remove from DB
+          logger.warn('TELEGRAM_QUEUE', `User ${messageData.chatId} blocked bot — archiving to ledger`);
+          await this._archiveAndRemoveBlockedUser(messageData.chatId);
           
           if (messageData.announcementId && messageData.userId) {
             await this.recordDelivery(messageData.announcementId, messageData.userId, 'skipped');
@@ -464,8 +522,6 @@ class TelegramQueue {
    */
   async recordDelivery(announcementId, userId, status, error = null) {
     try {
-      const db = (await import('../database.js')).default;
-      
       return new Promise((resolve) => {
         db.run(`
           INSERT INTO news_delivery_log 

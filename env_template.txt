@@ -67,6 +67,34 @@ USERNAME_SYNC_TIMEZONE=Africa/Nairobi
 # Default: 60000 (60 seconds)
 ADMIN_POLL_INTERVAL=60000
 
+# === LANGUAGE & TRANSLATION SETTINGS ===
+# Comma-separated list of enabled language codes (English is always enabled)
+# Available: ru,zh,es,fr,de,it,pt,pl,tr,ar,ja,ko,hi,nl,sv,no,da,fi,uk,cs,el
+ENABLED_LANGUAGES=ru,es,fr,de,zh
+
+# Default language for new users before they choose
+DEFAULT_LANGUAGE=en
+
+# Whether to translate product/category names (true/false)
+# Set to false to keep original names and avoid confusion
+TRANSLATE_PRODUCT_NAMES=false
+
+# LibreTranslate server URL for live translation
+LIBRETRANSLATE_URL=http://localhost:5000
+
+# LibreTranslate Docker container settings (auto-managed by bot)
+# Port to expose LibreTranslate API on the host
+LIBRETRANSLATE_PORT=5000
+# Docker container name
+LIBRETRANSLATE_CONTAINER_NAME=molotov-libretranslate
+# Auto-start LibreTranslate Docker container on bot init (true/false)
+# When enabled, bot will pull image, start container, and manage its lifecycle
+# Only requirement: Docker must be installed on the system
+LIBRETRANSLATE_AUTO_START=true
+
+# Preload all UI translations at startup for instant responses (true/false)
+PRELOAD_TRANSLATIONS=true
+
 # === INSTRUCTIONS ===
 # 1. Get BlockCypher API key (optional for free tier): https://accounts.blockcypher.com/
 # 2. Copy this file to .env and fill in your API keys if desired

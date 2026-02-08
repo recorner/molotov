@@ -22,3 +22,31 @@ export const USERNAME_SYNC_TIMEZONE = process.env.USERNAME_SYNC_TIMEZONE || 'Afr
 export const BOT_DESCRIPTION = process.env.BOT_DESCRIPTION || '🚀 Molotov Bot - Your premium digital marketplace for cryptocurrency products. Secure payments via Bitcoin and Litecoin. Browse verified accounts, proxy networks, phone numbers, and more. Trusted by professionals worldwide.';
 export const BOT_SHORT_DESCRIPTION = process.env.BOT_SHORT_DESCRIPTION || '💎 Premium digital marketplace for crypto products. Secure, verified, trusted.';
 export const BOT_ABOUT_TEXT = process.env.BOT_ABOUT_TEXT || '🛒 Premium Digital Marketplace\n\n💎 Molotov Bot offers exclusive digital products and services for cryptocurrency payments. We specialize in verified accounts, proxy networks, phone numbers, and premium digital tools.\n\n🔐 Secure payments via Bitcoin & Litecoin\n🌍 Worldwide trusted platform\n⚡ Instant delivery\n🛡️ Professional support';
+
+// === Language & Translation Settings ===
+// Comma-separated enabled language codes from env (English is always included)
+export const ENABLED_LANGUAGES = (() => {
+  const env = process.env.ENABLED_LANGUAGES;
+  if (env) {
+    const codes = env.split(',').map(c => c.trim().toLowerCase()).filter(Boolean);
+    // Always ensure 'en' is first
+    return ['en', ...codes.filter(c => c !== 'en')];
+  }
+  // Default fallback set
+  return ['en', 'ru', 'es', 'fr', 'de', 'zh'];
+})();
+
+export const DEFAULT_LANGUAGE = process.env.DEFAULT_LANGUAGE || 'en';
+
+// false = keep original product/category names (recommended to avoid confusion)
+export const TRANSLATE_PRODUCT_NAMES = process.env.TRANSLATE_PRODUCT_NAMES === 'true';
+
+export const LIBRETRANSLATE_URL = process.env.LIBRETRANSLATE_URL || 'http://localhost:5000';
+
+// LibreTranslate Docker management
+export const LIBRETRANSLATE_PORT = parseInt(process.env.LIBRETRANSLATE_PORT || '5000', 10);
+export const LIBRETRANSLATE_CONTAINER_NAME = process.env.LIBRETRANSLATE_CONTAINER_NAME || 'molotov-libretranslate';
+export const LIBRETRANSLATE_AUTO_START = process.env.LIBRETRANSLATE_AUTO_START !== 'false'; // default ON
+
+// Preload all UI translations into memory at startup
+export const PRELOAD_TRANSLATIONS = process.env.PRELOAD_TRANSLATIONS !== 'false';

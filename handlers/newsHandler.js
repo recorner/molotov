@@ -149,6 +149,10 @@ export async function handleNewsCallback(bot, query) {
     
     // Message actions
     if (data.startsWith('news_edit_')) return await handleEditMessage(bot, query, data);
+    if (data.startsWith('news_translate_preview_')) return await handleTranslatePreview(bot, query, data);
+    if (data.startsWith('news_use_translated_')) return await handleUseTranslated(bot, query, data);
+    if (data.startsWith('news_send_translated_')) return await handleSendTranslated(bot, query, data);
+    if (data.startsWith('news_revert_original_')) return await handleRevertOriginal(bot, query, data);
     if (data.startsWith('news_send_now_')) return await handleSendNow(bot, query, data);
     if (data.startsWith('news_schedule_')) return await handleScheduleMessage(bot, query, data);
     if (data.startsWith('news_save_draft_')) return await handleSaveDraft(bot, query, data);
@@ -372,6 +376,9 @@ async function handleTemplateSelection(bot, query, data) {
     parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
+        ...(lang !== 'en' ? [[
+          { text: `🌐 Translate to ${getLanguageName(lang)} & Preview`, callback_data: `news_translate_preview_${templateStyle}_${type}_${lang}` }
+        ]] : []),
         [
           { text: '✏️ Edit Message', callback_data: `news_edit_content_${templateStyle}_${type}_${lang}` },
           { text: '📝 Edit Title', callback_data: `news_edit_title_${templateStyle}_${type}_${lang}` }
@@ -467,6 +474,7 @@ async function handleMessageCreation(bot, msg, session) {
   // Update session with the content
   session.title = content.split('\n')[0].substring(0, 100) + (content.length > 100 ? '...' : '');
   session.content = content;
+  session.originalContent = content; // Keep original for re-translation
   session.action = 'message_created';
   
   // Ensure templateStyle is set for custom messages
@@ -475,29 +483,40 @@ async function handleMessageCreation(bot, msg, session) {
   }
   
   newsSessionManager.updateSession(userId, session);
+
+  // Build action buttons - add translate option if target is not English
+  const actionButtons = [
+    [
+      { text: '📤 Send Now', callback_data: `news_send_now_${session.templateStyle}_${session.type}_${session.lang}` },
+      { text: '⏰ Schedule', callback_data: `news_schedule_${session.templateStyle}_${session.type}_${session.lang}` }
+    ],
+    [
+      { text: '✏️ Edit Message', callback_data: `news_edit_content_${session.templateStyle}_${session.type}_${session.lang}` },
+      { text: '💾 Save Draft', callback_data: `news_save_draft_${session.templateStyle}_${session.type}_${session.lang}` }
+    ],
+    [
+      { text: '👀 Preview', callback_data: `news_preview_${session.templateStyle}_${session.type}_${session.lang}` },
+      { text: '🧪 Test Send', callback_data: `news_test_${session.templateStyle}_${session.type}_${session.lang}` }
+    ]
+  ];
+
+  // Add translate & preview button if target language is not English
+  if (session.lang !== 'en' && session.lang !== 'all') {
+    actionButtons.splice(0, 0, [
+      { text: `🌐 Translate to ${getLanguageName(session.lang)} & Preview`, callback_data: `news_translate_preview_${session.templateStyle}_${session.type}_${session.lang}` }
+    ]);
+  }
   
   return bot.sendMessage(msg.chat.id, `✅ **Message Created Successfully!**\n\n` +
     `📋 Title: *${session.title}*\n` +
     `🎯 Target: ${getLanguageFlag(session.lang)} ${getLanguageName(session.lang)}\n` +
     `👥 Recipients: **${session.userCount}** users\n` +
-    `📝 Length: ${content.length} characters\n\n` +
-    `What would you like to do next?`, {
+    `📝 Length: ${content.length} characters\n` +
+    (session.lang !== 'en' && session.lang !== 'all' ? `\n💡 *Tip:* Use "Translate & Preview" to auto-translate your English message to ${getLanguageName(session.lang)} before sending.\n` : '') +
+    `\nWhat would you like to do next?`, {
     parse_mode: 'Markdown',
     reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '📤 Send Now', callback_data: `news_send_now_${session.templateStyle}_${session.type}_${session.lang}` },
-          { text: '⏰ Schedule', callback_data: `news_schedule_${session.templateStyle}_${session.type}_${session.lang}` }
-        ],
-        [
-          { text: '✏️ Edit Message', callback_data: `news_edit_content_${session.templateStyle}_${session.type}_${session.lang}` },
-          { text: '💾 Save Draft', callback_data: `news_save_draft_${session.templateStyle}_${session.type}_${session.lang}` }
-        ],
-        [
-          { text: '👀 Preview', callback_data: `news_preview_${session.templateStyle}_${session.type}_${session.lang}` },
-          { text: '🧪 Test Send', callback_data: `news_test_${session.templateStyle}_${session.type}_${session.lang}` }
-        ]
-      ]
+      inline_keyboard: actionButtons
     }
   });
 }
@@ -1320,6 +1339,223 @@ async function showBroadcastSettings(bot, chatId, messageId) {
 }
 
 // === Missing Handler Functions ===
+
+// === Translate & Preview (write in English, auto-translate before send) ===
+
+async function handleTranslatePreview(bot, query, data) {
+  const userId = query.from.id;
+  const session = newsSessionManager.getSession(userId);
+  
+  if (!session || !session.content) {
+    return bot.answerCallbackQuery(query.id, { 
+      text: '❌ Session expired. Please start over.', 
+      show_alert: true 
+    });
+  }
+
+  const targetLang = session.lang;
+  if (!targetLang || targetLang === 'en') {
+    return bot.answerCallbackQuery(query.id, { 
+      text: 'ℹ️ No translation needed for English.', 
+      show_alert: false 
+    });
+  }
+
+  await bot.answerCallbackQuery(query.id, { text: '🔄 Translating...', show_alert: false });
+
+  try {
+    // Translate the message content
+    const translatedContent = await translationService.translate(session.content, targetLang);
+    const translatedTitle = session.title 
+      ? await translationService.translate(session.title, targetLang)
+      : session.title;
+    
+    // Store both original and translated versions in session
+    session.originalContent = session.originalContent || session.content;
+    session.originalTitle = session.originalTitle || session.title;
+    session.translatedContent = translatedContent;
+    session.translatedTitle = translatedTitle;
+    newsSessionManager.updateSession(userId, session);
+    
+    const userCount = await getUserCountForLanguage(targetLang);
+
+    return bot.editMessageText(
+      `🌐 **Translation Preview**\n\n` +
+      `🎯 Target: ${getLanguageFlag(targetLang)} ${getLanguageName(targetLang)} (${userCount} users)\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📄 **Original (English):**\n\n` +
+      `${(session.originalContent || session.content).substring(0, 400)}${(session.originalContent || session.content).length > 400 ? '...' : ''}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🌍 **Translated (${getLanguageName(targetLang)}):**\n\n` +
+      `${translatedContent.substring(0, 800)}${translatedContent.length > 800 ? '...' : ''}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `✅ Review the translation above. Click "Use Translation" to replace the message content with the translated version before sending.`, {
+      chat_id: query.message.chat.id,
+      message_id: query.message.message_id,
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: `✅ Use ${getLanguageName(targetLang)} Translation`, callback_data: `news_use_translated_${session.templateStyle || 'custom'}_${session.type}_${targetLang}` }
+          ],
+          [
+            { text: '📤 Send Translated Now', callback_data: `news_send_translated_${session.templateStyle || 'custom'}_${session.type}_${targetLang}` },
+          ],
+          [
+            { text: '✏️ Edit Original', callback_data: `news_edit_content_${session.templateStyle || 'custom'}_${session.type}_${targetLang}` },
+            { text: '🔄 Re-translate', callback_data: `news_translate_preview_${session.templateStyle || 'custom'}_${session.type}_${targetLang}` }
+          ],
+          [
+            { text: '🔙 Back (Keep Original)', callback_data: `news_template_${session.templateStyle || 'custom'}_${session.type}_${targetLang}` }
+          ]
+        ]
+      }
+    });
+  } catch (error) {
+    logger.error('NEWS', `Translation preview failed for user ${userId}`, error);
+    return bot.editMessageText(
+      `❌ **Translation Failed**\n\n` +
+      `Could not translate the message to ${getLanguageName(targetLang)}.\n` +
+      `Error: ${error.message}\n\n` +
+      `💡 You can still send the original English message, or try again.`, {
+      chat_id: query.message.chat.id,
+      message_id: query.message.message_id,
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '🔄 Try Again', callback_data: `news_translate_preview_${session.templateStyle || 'custom'}_${session.type}_${session.lang}` },
+            { text: '📤 Send Original', callback_data: `news_send_now_${session.templateStyle || 'custom'}_${session.type}_${session.lang}` }
+          ],
+          [{ text: '🔙 Back', callback_data: `news_template_${session.templateStyle || 'custom'}_${session.type}_${session.lang}` }]
+        ]
+      }
+    });
+  }
+}
+
+async function handleUseTranslated(bot, query, data) {
+  const userId = query.from.id;
+  const session = newsSessionManager.getSession(userId);
+  
+  if (!session || !session.translatedContent) {
+    return bot.answerCallbackQuery(query.id, { 
+      text: '❌ No translation available. Please translate first.', 
+      show_alert: true 
+    });
+  }
+
+  // Replace content with translated version
+  session.content = session.translatedContent;
+  if (session.translatedTitle) {
+    session.title = session.translatedTitle;
+  }
+  session.isTranslated = true;
+  session.action = 'translation_applied';
+  newsSessionManager.updateSession(userId, session);
+  
+  await bot.answerCallbackQuery(query.id, { text: '✅ Translation applied!', show_alert: false });
+  
+  const userCount = await getUserCountForLanguage(session.lang);
+  
+  return bot.editMessageText(
+    `✅ **Translation Applied**\n\n` +
+    `📋 Title: *${session.title}*\n` +
+    `🎯 Target: ${getLanguageFlag(session.lang)} ${getLanguageName(session.lang)}\n` +
+    `👥 Recipients: **${userCount}** users\n` +
+    `🌐 Language: Translated to ${getLanguageName(session.lang)}\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `📄 **Message Content:**\n\n` +
+    `${session.content.substring(0, 600)}${session.content.length > 600 ? '...' : ''}\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `Ready to send the translated message:`, {
+    chat_id: query.message.chat.id,
+    message_id: query.message.message_id,
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '📤 Send Now', callback_data: `news_send_now_${session.templateStyle || 'custom'}_${session.type}_${session.lang}` },
+          { text: '⏰ Schedule', callback_data: `news_schedule_${session.templateStyle || 'custom'}_${session.type}_${session.lang}` }
+        ],
+        [
+          { text: '🧪 Test Send', callback_data: `news_test_${session.templateStyle || 'custom'}_${session.type}_${session.lang}` },
+          { text: '💾 Save Draft', callback_data: `news_save_draft_${session.templateStyle || 'custom'}_${session.type}_${session.lang}` }
+        ],
+        [
+          { text: '🔙 Revert to Original', callback_data: `news_revert_original_${session.templateStyle || 'custom'}_${session.type}_${session.lang}` }
+        ]
+      ]
+    }
+  });
+}
+
+async function handleSendTranslated(bot, query, data) {
+  const userId = query.from.id;
+  const session = newsSessionManager.getSession(userId);
+  
+  if (!session || !session.translatedContent) {
+    return bot.answerCallbackQuery(query.id, { 
+      text: '❌ No translation available. Please translate first.', 
+      show_alert: true 
+    });
+  }
+  
+  // Apply translation and redirect to send flow
+  session.content = session.translatedContent;
+  if (session.translatedTitle) session.title = session.translatedTitle;
+  session.isTranslated = true;
+  newsSessionManager.updateSession(userId, session);
+  
+  // Redirect to the standard send-now flow
+  return await handleSendNow(bot, query, `news_send_now_${session.templateStyle || 'custom'}_${session.type}_${session.lang}`);
+}
+
+async function handleRevertOriginal(bot, query, data) {
+  const userId = query.from.id;
+  const session = newsSessionManager.getSession(userId);
+  
+  if (!session || !session.originalContent) {
+    return bot.answerCallbackQuery(query.id, { 
+      text: '❌ No original content found.', 
+      show_alert: true 
+    });
+  }
+  
+  // Revert to original content
+  session.content = session.originalContent;
+  if (session.originalTitle) session.title = session.originalTitle;
+  session.isTranslated = false;
+  session.translatedContent = null;
+  session.translatedTitle = null;
+  newsSessionManager.updateSession(userId, session);
+  
+  await bot.answerCallbackQuery(query.id, { text: '🔄 Reverted to original!', show_alert: false });
+  
+  return bot.editMessageText(
+    `🔄 **Reverted to Original**\n\n` +
+    `📋 Title: *${session.title}*\n` +
+    `📄 Content restored to the original English version.\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `${session.content.substring(0, 600)}${session.content.length > 600 ? '...' : ''}\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━`, {
+    chat_id: query.message.chat.id,
+    message_id: query.message.message_id,
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: `🌐 Translate to ${getLanguageName(session.lang)}`, callback_data: `news_translate_preview_${session.templateStyle || 'custom'}_${session.type}_${session.lang}` }
+        ],
+        [
+          { text: '📤 Send Original', callback_data: `news_send_now_${session.templateStyle || 'custom'}_${session.type}_${session.lang}` },
+          { text: '✏️ Edit', callback_data: `news_edit_content_${session.templateStyle || 'custom'}_${session.type}_${session.lang}` }
+        ],
+        [{ text: '🔙 Back', callback_data: `news_template_${session.templateStyle || 'custom'}_${session.type}_${session.lang}` }]
+      ]
+    }
+  });
+}
 
 async function handleDraftAction(bot, query, data) {
   return bot.answerCallbackQuery(query.id, { 

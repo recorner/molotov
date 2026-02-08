@@ -54,6 +54,13 @@ class MigrationManager {
         description: 'Enhanced categories/products, audit history, bulk operations, indexes',
         up: this.migration_007_product_management.bind(this),
         down: this.migration_007_down.bind(this)
+      },
+      {
+        version: 8,
+        name: 'removed_users_ledger',
+        description: 'Create removed_users_ledger table for archiving users removed by username sync',
+        up: this.migration_008_removed_users_ledger.bind(this),
+        down: this.migration_008_down.bind(this)
       }
     ];
     
@@ -615,6 +622,53 @@ class MigrationManager {
 
   async migration_007_down() {
     logger.warn('MIGRATION', 'Rollback for migration 007: soft-delete tables. Manual cleanup required.');
+  }
+
+  // Migration 008: Removed users ledger for username sync archival
+  async migration_008_removed_users_ledger() {
+    logger.info('MIGRATION', 'Creating removed_users_ledger table');
+
+    const runSQL = (sql) => new Promise((resolve) => {
+      db.run(sql, (err) => {
+        if (err && !err.message.includes('already exists')) {
+          logger.error('MIGRATION', `SQL error: ${err.message}`, { sql: sql.substring(0, 120) });
+        }
+        resolve();
+      });
+    });
+
+    await runSQL(`
+      CREATE TABLE IF NOT EXISTS removed_users_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_id INTEGER NOT NULL,
+        username TEXT,
+        first_name TEXT,
+        last_name TEXT,
+        language_code TEXT,
+        original_created_at TEXT,
+        last_activity TEXT,
+        removal_reason TEXT NOT NULL,
+        removal_category TEXT NOT NULL,
+        api_error_message TEXT,
+        removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        restored_at TIMESTAMP,
+        notes TEXT
+      )
+    `);
+
+    await runSQL(`CREATE INDEX IF NOT EXISTS idx_removed_ledger_telegram_id ON removed_users_ledger(telegram_id)`);
+    await runSQL(`CREATE INDEX IF NOT EXISTS idx_removed_ledger_category ON removed_users_ledger(removal_category)`);
+    await runSQL(`CREATE INDEX IF NOT EXISTS idx_removed_ledger_removed_at ON removed_users_ledger(removed_at)`);
+
+    logger.info('MIGRATION', 'Removed users ledger migration complete');
+  }
+
+  async migration_008_down() {
+    const runSQL = (sql) => new Promise((resolve) => {
+      db.run(sql, (err) => { resolve(); });
+    });
+    await runSQL(`DROP TABLE IF EXISTS removed_users_ledger`);
+    logger.warn('MIGRATION', 'Rolled back migration 008: dropped removed_users_ledger');
   }
 
   // Export for use in bot.js

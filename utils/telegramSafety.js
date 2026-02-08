@@ -2,114 +2,170 @@
 import logger from './logger.js';
 
 class TelegramSafety {
-  static escapeMarkdown(text) {
+  /**
+   * Strip all Markdown special chars so text is sent as plain.
+   */
+  static stripMarkdown(text) {
     if (!text || typeof text !== 'string') return text;
-    
-    // Only escape dynamic content that could break markdown
-    // Don't escape template markdown that we control
-    return text
-      .replace(/([^\\])([*_`\[\]()~>#+\-=|{}.!\\])/g, '$1\\$2') // Escape special chars except at start
-      .replace(/^([*_`\[\]()~>#+\-=|{}.!\\])/g, '\\$1'); // Escape special chars at start
+    return text.replace(/[*_`\[\]()~]/g, '');
   }
 
+  /**
+   * Sanitize text: fix unclosed Markdown pairs so Telegram can parse it.
+   */
   static sanitizeText(text) {
-    if (!text) return text;
-    
-    // Remove problematic zero-width characters
+    if (!text || typeof text !== 'string') return text;
+
+    // Remove zero-width characters
     let cleaned = text.replace(/[\u200B-\u200D\uFEFF]/g, '');
-    
-    // Fix broken markdown by ensuring proper pairing
+
+    // Fix consecutive special chars that break parsing
+    cleaned = cleaned.replace(/\*{3,}/g, '**');
+    cleaned = cleaned.replace(/_{3,}/g, '__');
+    cleaned = cleaned.replace(/`{3,}/g, '``');
+
+    // Close unclosed Markdown pairs
     const asterisks = (cleaned.match(/\*/g) || []).length;
     const underscores = (cleaned.match(/_/g) || []).length;
     const backticks = (cleaned.match(/`/g) || []).length;
-    
-    // Close unclosed markdown
+
     if (asterisks % 2 !== 0) cleaned += '*';
     if (underscores % 2 !== 0) cleaned += '_';
     if (backticks % 2 !== 0) cleaned += '`';
-    
+
+    // Check for unmatched square/round brackets that break link parsing
+    const openBrackets = (cleaned.match(/\[/g) || []).length;
+    const closeBrackets = (cleaned.match(/\]/g) || []).length;
+    if (openBrackets !== closeBrackets) {
+      // Escape all brackets when they don't match
+      cleaned = cleaned.replace(/\[/g, '(').replace(/\]/g, ')');
+    }
+
     return cleaned;
   }
 
+  /**
+   * Check if an error is a Telegram Markdown parse error.
+   */
+  static isParseError(error) {
+    const msg = error?.message || error?.response?.body?.description || '';
+    return msg.includes("can't parse entities") || msg.includes('Bad Request: can');
+  }
+
   static patchBot(bot) {
-    // Store original methods
     const originalSendMessage = bot.sendMessage.bind(bot);
     const originalEditMessageText = bot.editMessageText.bind(bot);
-
-    // Monkey patch sendMessage
-    bot.sendMessage = function(chatId, text, options = {}) {
-      try {
-        // Sanitize text for telegram
-        const sanitizedText = TelegramSafety.sanitizeText(text);
-        
-        return originalSendMessage(chatId, sanitizedText, options);
-      } catch (error) {
-        logger.error('TELEGRAM_SAFETY', 'sendMessage failed, trying without markdown', error);
-        
-        // Fallback: try without markdown
-        try {
-          const escapedText = TelegramSafety.escapeMarkdown(text);
-          const safeOptions = { ...options };
-          delete safeOptions.parse_mode; // Remove markdown parsing
-          
-          return originalSendMessage(chatId, escapedText, safeOptions);
-        } catch (fallbackError) {
-          logger.error('TELEGRAM_SAFETY', 'Fallback sendMessage also failed', fallbackError);
-          
-          // Final fallback: plain text only
-          const plainText = text.replace(/[*_`\[\]()~]/g, '');
-          return originalSendMessage(chatId, plainText, { reply_markup: options.reply_markup });
-        }
-      }
-    };
-
-    // Monkey patch editMessageText
-    bot.editMessageText = function(text, options = {}) {
-      try {
-        // Sanitize text for telegram
-        const sanitizedText = TelegramSafety.sanitizeText(text);
-        
-        return originalEditMessageText(sanitizedText, options);
-      } catch (error) {
-        logger.error('TELEGRAM_SAFETY', 'editMessageText failed, trying without markdown', error);
-        
-        // Fallback: try without markdown
-        try {
-          const escapedText = TelegramSafety.escapeMarkdown(text);
-          const safeOptions = { ...options };
-          delete safeOptions.parse_mode; // Remove markdown parsing
-          
-          return originalEditMessageText(escapedText, safeOptions);
-        } catch (fallbackError) {
-          logger.error('TELEGRAM_SAFETY', 'Fallback editMessageText also failed', fallbackError);
-          
-          // Final fallback: try sending new message instead
-          if (options.chat_id) {
-            const plainText = text.replace(/[*_`\[\]()~]/g, '');
-            return originalSendMessage(options.chat_id, plainText, { reply_markup: options.reply_markup });
-          }
-          throw fallbackError;
-        }
-      }
-    };
-
-    // Monkey patch answerCallbackQuery for safety
+    const originalSendPhoto = bot.sendPhoto.bind(bot);
+    const originalEditMessageCaption = bot.editMessageCaption.bind(bot);
     const originalAnswerCallbackQuery = bot.answerCallbackQuery.bind(bot);
-    bot.answerCallbackQuery = function(queryId, options = {}) {
+
+    // ── sendMessage (async-safe) ─────────────────────
+    bot.sendMessage = async function(chatId, text, options = {}) {
+      try {
+        return await originalSendMessage(chatId, TelegramSafety.sanitizeText(text), options);
+      } catch (error) {
+        if (TelegramSafety.isParseError(error)) {
+          logger.warn('TELEGRAM_SAFETY', 'sendMessage parse error, retrying without Markdown');
+          const safeOpts = { ...options };
+          delete safeOpts.parse_mode;
+          try {
+            return await originalSendMessage(chatId, TelegramSafety.stripMarkdown(text), safeOpts);
+          } catch (e2) {
+            logger.error('TELEGRAM_SAFETY', 'sendMessage plain fallback also failed', e2);
+            throw e2;
+          }
+        }
+        throw error;
+      }
+    };
+
+    // ── editMessageText (async-safe) ─────────────────
+    bot.editMessageText = async function(text, options = {}) {
+      try {
+        return await originalEditMessageText(TelegramSafety.sanitizeText(text), options);
+      } catch (error) {
+        if (TelegramSafety.isParseError(error)) {
+          logger.warn('TELEGRAM_SAFETY', 'editMessageText parse error, retrying without Markdown');
+          const safeOpts = { ...options };
+          delete safeOpts.parse_mode;
+          try {
+            return await originalEditMessageText(TelegramSafety.stripMarkdown(text), safeOpts);
+          } catch (e2) {
+            // If edit still fails (e.g., message not modified), try send new
+            if (options.chat_id) {
+              return await originalSendMessage(options.chat_id, TelegramSafety.stripMarkdown(text), { reply_markup: options.reply_markup });
+            }
+            throw e2;
+          }
+        }
+        throw error;
+      }
+    };
+
+    // ── sendPhoto (async-safe) ────────────────────────
+    bot.sendPhoto = async function(chatId, photo, options = {}) {
+      try {
+        if (options.caption) {
+          options = { ...options, caption: TelegramSafety.sanitizeText(options.caption) };
+        }
+        return await originalSendPhoto(chatId, photo, options);
+      } catch (error) {
+        if (TelegramSafety.isParseError(error)) {
+          logger.warn('TELEGRAM_SAFETY', 'sendPhoto parse error, retrying without Markdown');
+          const safeOpts = { ...options };
+          delete safeOpts.parse_mode;
+          if (safeOpts.caption) safeOpts.caption = TelegramSafety.stripMarkdown(safeOpts.caption);
+          try {
+            return await originalSendPhoto(chatId, photo, safeOpts);
+          } catch (e2) {
+            logger.error('TELEGRAM_SAFETY', 'sendPhoto plain fallback failed, sending as text', e2);
+            // Last resort: send as text message instead
+            return await originalSendMessage(chatId, TelegramSafety.stripMarkdown(options.caption || ''), { reply_markup: options.reply_markup });
+          }
+        }
+        throw error;
+      }
+    };
+
+    // ── editMessageCaption (async-safe) ───────────────
+    bot.editMessageCaption = async function(caption, options = {}) {
+      try {
+        return await originalEditMessageCaption(TelegramSafety.sanitizeText(caption), options);
+      } catch (error) {
+        if (TelegramSafety.isParseError(error)) {
+          logger.warn('TELEGRAM_SAFETY', 'editMessageCaption parse error, retrying without Markdown');
+          const safeOpts = { ...options };
+          delete safeOpts.parse_mode;
+          try {
+            return await originalEditMessageCaption(TelegramSafety.stripMarkdown(caption), safeOpts);
+          } catch (e2) {
+            // Not critical, just log
+            if (!e2.message?.includes('message is not modified')) {
+              logger.error('TELEGRAM_SAFETY', 'editMessageCaption plain fallback also failed', e2);
+            }
+            throw e2;
+          }
+        }
+        throw error;
+      }
+    };
+
+    // ── answerCallbackQuery (async-safe) ──────────────
+    bot.answerCallbackQuery = async function(queryId, options = {}) {
       try {
         if (options.text) {
-          // Remove markdown from callback query text
-          options.text = options.text.replace(/[*_`\[\]()~]/g, '');
+          options = { ...options, text: TelegramSafety.stripMarkdown(options.text) };
         }
-        return originalAnswerCallbackQuery(queryId, options);
+        return await originalAnswerCallbackQuery(queryId, options);
       } catch (error) {
         logger.error('TELEGRAM_SAFETY', 'answerCallbackQuery failed', error);
-        // Try with just the query ID
-        return originalAnswerCallbackQuery(queryId, { text: 'Action processed' });
+        try {
+          return await originalAnswerCallbackQuery(queryId, { text: 'Action processed' });
+        } catch { /* ignore */ }
       }
     };
 
-    logger.info('TELEGRAM_SAFETY', 'Bot methods patched for safe markdown handling');
+    logger.info('TELEGRAM_SAFETY', 'Bot methods patched for safe markdown handling (async)');
   }
 }
 

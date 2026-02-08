@@ -53,12 +53,17 @@ export async function showProductsInCategory(bot, chatId, categoryId, page = 1, 
         }
 
         // Prepare products for UI optimizer
+        // Product names and descriptions are kept as-is unless TRANSLATE_PRODUCT_NAMES=true
         const productsData = [];
         for (const product of products) {
-          const translatedName = await instantTranslationService.getTranslation(product.name, chatId);
-          const translatedDesc = product.description ? 
-            await instantTranslationService.getTranslation(product.description, chatId) : 
-            await messageTranslator.translateTemplateForUser('no_description', chatId);
+          const translatedName = translationService.shouldTranslateNames()
+            ? await instantTranslationService.getTranslation(product.name, chatId)
+            : product.name;
+          const translatedDesc = translationService.shouldTranslateNames()
+            ? (product.description 
+                ? await instantTranslationService.getTranslation(product.description, chatId)
+                : await messageTranslator.translateTemplateForUser('no_description', chatId))
+            : (product.description || await messageTranslator.translateTemplateForUser('no_description', chatId));
 
           productsData.push({
             id: product.id,

@@ -419,16 +419,26 @@ class MessageTranslator {
       const { replacements = {}, ...botOptions } = options;
       const translatedText = await this.translateForUser(templateKeyOrText, chatId, replacements);
       
-      // Use simple file path approach to avoid 414 error
-      // Accept deprecation warning for now - functionality is more important
       return await bot.sendPhoto(chatId, photoPath, {
         caption: translatedText,
         parse_mode: 'Markdown',
         ...botOptions
       });
     } catch (error) {
-      logger.error('TRANSLATOR', `Failed to send photo with translated caption for chat ${chatId}`, error);
-      throw error;
+      logger.warn('TRANSLATOR', `sendPhoto with caption failed for chat ${chatId}, retrying plain`, error);
+      // The TelegramSafety patch should already handle retries,
+      // but as a last resort send as a text message
+      try {
+        const { replacements = {}, ...botOptions } = options;
+        const translatedText = await this.translateForUser(templateKeyOrText, chatId, replacements);
+        const plain = translatedText.replace(/[*_`\[\]()~]/g, '');
+        return await bot.sendMessage(chatId, plain, {
+          reply_markup: botOptions.reply_markup
+        });
+      } catch (fallbackErr) {
+        logger.error('TRANSLATOR', `Final fallback also failed for chat ${chatId}`, fallbackErr);
+        throw fallbackErr;
+      }
     }
   }
 

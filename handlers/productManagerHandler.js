@@ -5,6 +5,7 @@ import adminManager from '../utils/adminManager.js';
 import productManager from '../utils/productManager.js';
 import stateManager from '../utils/stateManager.js';
 import logger from '../utils/logger.js';
+import newsBroadcaster from '../utils/newsBroadcaster.js';
 
 // ═══════════════════════════════════════════════════════════════════════
 //  State key helpers  (using stateManager for wizard flows)
@@ -221,11 +222,11 @@ async function showProductList(bot, chatId, categoryId, page, messageId = null) 
       { text: '📥 Bulk Import Here', callback_data: `pm_bulk_to_cat_${categoryId}` }
     ]);
     if (result.total > 0) {
-      buttons.push([{ text: `💣 Nuke All in ${cat?.name}`, callback_data: `pm_nuke_cat_${categoryId}` }]);
+      buttons.push([{ text: `💣 Nuke ${result.total} in ${cat?.name}`, callback_data: `pm_nuke_cat_${categoryId}` }]);
     }
-  } else if (result.total > 0 || subs.length > 0) {
-    // Parent category — nuke all descendants
-    buttons.push([{ text: `💣 Nuke All in ${cat?.name}`, callback_data: `pm_nuke_cat_${categoryId}` }]);
+  } else if (result.total > 0) {
+    // Parent category — only show nuke if there are DIRECT products in this parent
+    buttons.push([{ text: `💣 Nuke ${result.total} direct in ${cat?.name}`, callback_data: `pm_nuke_cat_${categoryId}` }]);
   }
 
   // Back: go to parent category, or browse root
@@ -937,6 +938,25 @@ export async function handleProductManagerCallback(bot, query) {
         resultText += `\n\n*Errors:*\n${res.errors.slice(0, 10).join('\n')}`;
       }
 
+      // If products were successfully added, offer notification
+      if (res.successCount > 0) {
+        // Generate default marketing message
+        const defaultMsg = generateBulkNotificationMessage(res.successCount);
+        setState(userId, { step: 'bulk_notify_preview', batchId, successCount: res.successCount, notifyMessage: defaultMsg, notifyLang: 'all' });
+
+        resultText += `\n\n━━━━━━━━━━━━━━━━━━━━━\n` +
+          `📢 *Notify users about new products?*`;
+
+        return bot.editMessageText(resultText, {
+          chat_id: chatId, message_id: statusMsg.message_id,
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [
+            [{ text: '📢 Preview Notification', callback_data: `pm_notify_preview_${batchId}` }],
+            [{ text: '🔙 Skip — Main Menu', callback_data: 'pm_main' }]
+          ]}
+        });
+      }
+
       return bot.editMessageText(resultText, {
         chat_id: chatId, message_id: statusMsg.message_id,
         parse_mode: 'Markdown',
@@ -987,6 +1007,182 @@ export async function handleProductManagerCallback(bot, query) {
     } catch (err) {
       logger.error('PRODUCT', 'Bulk revert error', err);
       return bot.editMessageText(`❌ Revert failed: ${err.message}`, { chat_id: chatId, message_id: statusMsg.message_id });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  BULK NOTIFICATION — preview, language select, edit, send
+  // ═══════════════════════════════════════════════════════════════════
+
+  if (data.startsWith('pm_notify_preview_')) {
+    const state = getState(userId);
+    if (!state || !state.notifyMessage) {
+      return send(bot, chatId, '❌ Session expired.', [[{ text: '🔙 Main Menu', callback_data: 'pm_main' }]], messageId);
+    }
+
+    const lang = state.notifyLang || 'all';
+    const userCount = await getUserCountForLang(lang);
+    const langLabel = langDisplay(lang);
+
+    return send(bot, chatId,
+      `📢 *Notification Preview*\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `${state.notifyMessage}\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `🌐 *Language:* ${langLabel}\n` +
+      `👥 *Recipients:* ${userCount} users\n` +
+      `📸 Will be sent with banner image`,
+      [
+        [{ text: `🌐 Language: ${langLabel}`, callback_data: 'pm_notify_lang' }],
+        [{ text: '✏️ Edit Message', callback_data: 'pm_notify_edit' }],
+        [{ text: `📢 Send to ${userCount} Users`, callback_data: 'pm_notify_confirm' }],
+        [{ text: '🔙 Skip — Main Menu', callback_data: 'pm_main' }]
+      ], messageId);
+  }
+
+  // ── Language selection screen ──
+  if (data === 'pm_notify_lang') {
+    const state = getState(userId);
+    if (!state || !state.notifyMessage) {
+      return send(bot, chatId, '❌ Session expired.', [[{ text: '🔙 Main Menu', callback_data: 'pm_main' }]], messageId);
+    }
+
+    const stats = await getLanguageStats();
+    const totalUsers = Object.values(stats).reduce((a, b) => a + b, 0);
+
+    let text = `🌐 *Select Notification Language*\n\n`;
+    text += `📊 *User Distribution:*\n\n`;
+    for (const [code, count] of Object.entries(stats)) {
+      text += `${langFlag(code)} ${langName(code)}: *${count}* users\n`;
+    }
+    text += `\n🌍 All Languages: *${totalUsers}* total users\n\n`;
+    text += `Currently selected: *${langDisplay(state.notifyLang || 'all')}*`;
+
+    // Build language buttons — 2 per row
+    const langCodes = Object.keys(stats);
+    const keyboard = [];
+    for (let i = 0; i < langCodes.length; i += 2) {
+      const row = [];
+      for (let j = i; j < Math.min(i + 2, langCodes.length); j++) {
+        const c = langCodes[j];
+        const sel = (state.notifyLang === c) ? '✅ ' : '';
+        row.push({ text: `${sel}${langFlag(c)} ${langName(c)} (${stats[c]})`, callback_data: `pm_notify_setlang_${c}` });
+      }
+      keyboard.push(row);
+    }
+    const allSel = (!state.notifyLang || state.notifyLang === 'all') ? '✅ ' : '';
+    keyboard.push([{ text: `${allSel}🌍 All Languages (${totalUsers})`, callback_data: 'pm_notify_setlang_all' }]);
+    keyboard.push([{ text: '🔙 Back to Preview', callback_data: `pm_notify_preview_${state.batchId || 'x'}` }]);
+
+    return send(bot, chatId, text, keyboard, messageId);
+  }
+
+  // ── Language selection handler ──
+  if (data.startsWith('pm_notify_setlang_')) {
+    const lang = data.replace('pm_notify_setlang_', '');
+    const state = getState(userId);
+    if (!state || !state.notifyMessage) {
+      return send(bot, chatId, '❌ Session expired.', [[{ text: '🔙 Main Menu', callback_data: 'pm_main' }]], messageId);
+    }
+    setState(userId, { ...state, notifyLang: lang });
+    // Bounce back to preview
+    const userCount = await getUserCountForLang(lang);
+    const langLabel = langDisplay(lang);
+
+    return send(bot, chatId,
+      `📢 *Notification Preview*\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `${state.notifyMessage}\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `🌐 *Language:* ${langLabel}\n` +
+      `👥 *Recipients:* ${userCount} users\n` +
+      `📸 Will be sent with banner image`,
+      [
+        [{ text: `🌐 Language: ${langLabel}`, callback_data: 'pm_notify_lang' }],
+        [{ text: '✏️ Edit Message', callback_data: 'pm_notify_edit' }],
+        [{ text: `📢 Send to ${userCount} Users`, callback_data: 'pm_notify_confirm' }],
+        [{ text: '🔙 Skip — Main Menu', callback_data: 'pm_main' }]
+      ], messageId);
+  }
+
+  if (data === 'pm_notify_edit') {
+    const state = getState(userId);
+    if (!state || !state.notifyMessage) {
+      return send(bot, chatId, '❌ Session expired.', [[{ text: '🔙 Main Menu', callback_data: 'pm_main' }]], messageId);
+    }
+    setState(userId, { ...state, step: 'bulk_notify_edit' });
+    return send(bot, chatId,
+      `✏️ *Edit Notification Message*\n\n` +
+      `Current message:\n\n\'\'\'\n${state.notifyMessage}\n\'\'\'\n\n` +
+      `Type your new message below.\n` +
+      `Use *bold*, _italic_, and include /start for users to browse.`,
+      [[{ text: '🔙 Cancel — Keep Original', callback_data: `pm_notify_preview_${state.batchId || 'x'}` }]], messageId);
+  }
+
+  if (data === 'pm_notify_confirm') {
+    const state = getState(userId);
+    if (!state || !state.notifyMessage) {
+      return send(bot, chatId, '❌ Session expired.', [[{ text: '🔙 Main Menu', callback_data: 'pm_main' }]], messageId);
+    }
+
+    const lang = state.notifyLang || 'all';
+    const userCount = await getUserCountForLang(lang);
+    const langLabel = langDisplay(lang);
+
+    return send(bot, chatId,
+      `🚀 *Confirm Broadcast*\n\n` +
+      `🌐 *Language:* ${langLabel}\n` +
+      `⚠️ This will send the notification to *${userCount}* users.\n\n` +
+      `This cannot be undone.`,
+      [
+        [{ text: `✅ SEND TO ${userCount} USERS`, callback_data: 'pm_notify_send' }],
+        [{ text: '✏️ Edit First', callback_data: 'pm_notify_edit' }],
+        [{ text: '❌ Cancel', callback_data: 'pm_main' }]
+      ], messageId);
+  }
+
+  if (data === 'pm_notify_send') {
+    const state = getState(userId);
+    if (!state || !state.notifyMessage) {
+      return send(bot, chatId, '❌ Session expired.', [[{ text: '🔙 Main Menu', callback_data: 'pm_main' }]], messageId);
+    }
+
+    const lang = state.notifyLang || 'all';
+    const langLabel = langDisplay(lang);
+    clearState(userId);
+    const statusMsg = await bot.sendMessage(chatId, `📢 Broadcasting to ${langLabel} users...`);
+
+    try {
+      // Save as announcement in the DB
+      const announcementId = await saveNotificationToDB(state.notifyMessage, lang, userId);
+
+      // Broadcast using selected language
+      const result = await newsBroadcaster.broadcast({
+        id: announcementId,
+        title: '🛍️ New Products Available',
+        content: state.notifyMessage,
+        targetLanguage: lang,
+        createdBy: userId
+      });
+
+      return bot.editMessageText(
+        `✅ *Notification Sent!*\n\n` +
+        `🌐 Language: ${langLabel}\n` +
+        `👥 Delivered to: *${result.successCount}* users\n` +
+        `❌ Failed: *${result.failedCount}*\n` +
+        `⏱️ Duration: ${Math.round(result.duration / 1000)}s`,
+        {
+          chat_id: chatId, message_id: statusMsg.message_id,
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '🔙 Main Menu', callback_data: 'pm_main' }]] }
+        }
+      );
+    } catch (err) {
+      logger.error('PRODUCT', 'Bulk notification broadcast error', err);
+      return bot.editMessageText(`❌ Broadcast failed: ${err.message}`, {
+        chat_id: chatId, message_id: statusMsg.message_id,
+        reply_markup: { inline_keyboard: [[{ text: '🔙 Main Menu', callback_data: 'pm_main' }]] }
+      });
     }
   }
 
@@ -1225,6 +1421,21 @@ export async function handleProductManagerInput(bot, msg) {
     return true;
   }
 
+  // ── Bulk notification — edit message ──
+  if (state.step === 'bulk_notify_edit' && text) {
+    setState(userId, { ...state, step: 'bulk_notify_preview', notifyMessage: text });
+    await bot.sendMessage(chatId, `✅ Message updated!\n\n📢 *Preview:*\n\n${text}`, {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📢 Preview Full', callback_data: `pm_notify_preview_${state.batchId || 'x'}` }],
+          [{ text: '✏️ Edit Again', callback_data: 'pm_notify_edit' }]
+        ]
+      }
+    });
+    return true;
+  }
+
   // ── Search ──
   if (state.step === 'search' && text) {
     setState(userId, { step: 'search', searchQuery: text });
@@ -1414,4 +1625,95 @@ export async function handleProductAddSave(bot, query) {
     ],
     messageId
   );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  NOTIFICATION HELPERS
+// ═══════════════════════════════════════════════════════════════════════
+
+// Inline language map — no dependency on translationService
+const LANG_MAP = {
+  en: { name: 'English',    flag: '🇺🇸' },
+  ru: { name: 'Русский',    flag: '🇷🇺' },
+  es: { name: 'Español',    flag: '🇪🇸' },
+  fr: { name: 'Français',   flag: '🇫🇷' },
+  de: { name: 'Deutsch',    flag: '🇩🇪' },
+  it: { name: 'Italiano',   flag: '🇮🇹' },
+  nl: { name: 'Nederlands', flag: '🇳🇱' },
+  he: { name: 'עברית',      flag: '🇮🇱' },
+  pt: { name: 'Português',  flag: '🇵🇹' },
+  zh: { name: '中文',        flag: '🇨🇳' },
+  ja: { name: '日本語',      flag: '🇯🇵' },
+  ko: { name: '한국어',      flag: '🇰🇷' },
+  ar: { name: 'العربية',     flag: '🇸🇦' },
+  pl: { name: 'Polski',     flag: '🇵🇱' },
+  tr: { name: 'Türkçe',     flag: '🇹🇷' },
+  uk: { name: 'Українська', flag: '🇺🇦' },
+  sv: { name: 'Svenska',    flag: '🇸🇪' },
+  hi: { name: 'हिंदी',       flag: '🇮🇳' },
+};
+
+function langName(code) {
+  if (code === 'all') return 'All Languages';
+  return LANG_MAP[code]?.name || code.toUpperCase();
+}
+
+function langFlag(code) {
+  if (code === 'all') return '🌍';
+  return LANG_MAP[code]?.flag || '🏳️';
+}
+
+function langDisplay(code) {
+  return `${langFlag(code)} ${langName(code)}`;
+}
+
+function generateBulkNotificationMessage(count) {
+  return (
+    `🔥 *Fresh Drop Alert!* 🔥\n\n` +
+    `🛍️ We just stocked *${count} new product${count !== 1 ? 's' : ''}* — hand-picked and ready for you!\n\n` +
+    `💎 Premium quality, best prices — don't miss out before they're gone.\n\n` +
+    `👉 Tap /start to browse the latest selection now!\n\n` +
+    `⚡ *First come, first served* ⚡`
+  );
+}
+
+async function getUserCountForLang(lang) {
+  try {
+    const row = await new Promise((resolve, reject) => {
+      if (lang === 'all') {
+        db.db.get(`SELECT COUNT(*) as count FROM users WHERE language_code IS NOT NULL`, (err, r) => err ? reject(err) : resolve(r));
+      } else {
+        db.db.get(`SELECT COUNT(*) as count FROM users WHERE language_code = ?`, [lang], (err, r) => err ? reject(err) : resolve(r));
+      }
+    });
+    return row?.count || 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function getLanguageStats() {
+  try {
+    const rows = await new Promise((resolve, reject) => {
+      db.db.all(`SELECT language_code, COUNT(*) as count FROM users WHERE language_code IS NOT NULL GROUP BY language_code ORDER BY count DESC`, (err, r) => err ? reject(err) : resolve(r));
+    });
+    const stats = {};
+    for (const row of (rows || [])) {
+      stats[row.language_code] = row.count;
+    }
+    return stats;
+  } catch {
+    return {};
+  }
+}
+
+async function saveNotificationToDB(content, lang, userId) {
+  return new Promise((resolve, reject) => {
+    const stmt = `INSERT INTO news_announcements (title, content, status, target_languages, created_by, created_at)
+                  VALUES (?, ?, 'sent', ?, ?, datetime('now'))`;
+    db.db.run(stmt, ['🛍️ New Products Available', content, JSON.stringify([lang]), userId], function (err) {
+      if (err) return reject(err);
+      resolve(this.lastID);
+    });
+  });
 }

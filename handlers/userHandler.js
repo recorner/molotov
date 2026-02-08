@@ -144,11 +144,13 @@ export async function showCategoriesMenu(bot, userId, isWelcome = true) {
 
             const buttons = [];
             
-            // Translate category names and create buttons
+            // Show category names - keep original names unless configured to translate
             for (const row of rows) {
-              const translatedName = await instantTranslationService.getTranslation(row.name, userId);
+              const displayName = translationService.shouldTranslateNames()
+                ? await instantTranslationService.getTranslation(row.name, userId)
+                : row.name;
               buttons.push([{
-                text: `📂 ${translatedName}`,
+                text: `📂 ${displayName}`,
                 callback_data: `cat_${row.id}`
               }]);
             }

@@ -120,10 +120,21 @@ class SmartMessageManager {
           }
         }
         return { message_id: messageId };
+      } else if (error.message && error.message.includes('no caption in the message')) {
+        // Message has no caption (e.g., plain photo) - try safeEditMessage instead
+        logger.debug('SMART_EDIT', `No caption on message ${messageId}, falling back to safe edit`);
+        await safeEditMessage(bot, chatId, messageId, text, options);
+        return { message_id: messageId };
       } else {
         logger.warn('SMART_EDIT', `Failed to edit photo caption for message ${messageId}, fallback to safe edit`, error);
         // Fallback to safe edit (which might replace the message)
-        await safeEditMessage(bot, chatId, messageId, text, options);
+        try {
+          await safeEditMessage(bot, chatId, messageId, text, options);
+        } catch {
+          // If safe edit also fails, try sending new plain message
+          const plainText = text.replace(/[*_`\[\]()~]/g, '');
+          await bot.sendMessage(chatId, plainText, { reply_markup: options.reply_markup });
+        }
         return { message_id: messageId };
       }
     }

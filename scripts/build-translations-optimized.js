@@ -16,7 +16,8 @@ class OptimizedTranslationBuilder {
   constructor() {
     this.outputDir = path.join(__dirname, '../generated/translations');
     this.translationsData = {};
-    this.supportedLanguages = this.getSupportedLanguagesFromEnv();
+    // Use enabled languages from translationService (reads ENABLED_LANGUAGES from .env)
+    this.supportedLanguages = translationService.getEnabledCodes().filter(c => c !== 'en');
     this.stats = {
       totalTemplates: 0,
       totalLanguages: 0,
@@ -24,26 +25,7 @@ class OptimizedTranslationBuilder {
       failedTranslations: 0,
       startTime: Date.now()
     };
-  }
-
-  // Get supported languages from environment
-  getSupportedLanguagesFromEnv() {
-    const envLanguages = process.env.SUPPORTED_LANGUAGES;
-    
-    if (!envLanguages) {
-      console.warn('⚠️ SUPPORTED_LANGUAGES not set in environment, using default set');
-      return ['es', 'fr', 'de', 'ru', 'zh'];
-    }
-
-    const languages = envLanguages.split(',').map(lang => lang.trim()).filter(lang => lang);
-    
-    if (languages.length === 0) {
-      console.warn('⚠️ No valid languages found in SUPPORTED_LANGUAGES, using default set');
-      return ['es', 'fr', 'de', 'ru', 'zh'];
-    }
-    
-    console.log(`🎯 Building translations for configured languages: ${languages.join(', ')}`);
-    return languages;
+    console.log(`🎯 Building translations for: ${this.supportedLanguages.join(', ')}`);
   }
 
   // Ensure output directory exists
@@ -207,6 +189,10 @@ class OptimizedTranslationBuilder {
 async function main() {
   console.log('🚀 Optimized Translation Build Process Started');
   console.log('===============================================');
+
+  // Ensure LibreTranslate connection is tested before building
+  const libreOk = await translationService.testConnection();
+  console.log(libreOk ? '✅ LibreTranslate connected' : '⚠️ LibreTranslate unavailable - using fallbacks only');
 
   const builder = new OptimizedTranslationBuilder();
 

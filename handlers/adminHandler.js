@@ -5,6 +5,8 @@ import logger from '../utils/logger.js';
 import smartMessageManager from '../utils/smartMessageManager.js';
 import uiOptimizer from '../utils/uiOptimizer.js';
 import spamPrevention from '../utils/spamPrevention.js';
+import translationService from '../utils/translationService.js';
+import libreTranslateManager from '../utils/libreTranslateManager.js';
 
 // === Handle /cocktail Command ===
 export async function handleAdminCommand(bot, msg) {
@@ -159,35 +161,59 @@ export async function handleAdminCallback(bot, query) {
     });
   }
 
-  // === Submenu: Language Analytics ===
+  // === Submenu: Language Analytics & Management ===
   if (data === 'panel_language_stats') {
-    // Show loading state first
     await smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
-      uiOptimizer.createStatusMessage('loading', 'Loading Language Analytics', {
-        details: 'Analyzing user preferences and translation statistics...'
+      uiOptimizer.createStatusMessage('loading', 'Loading Language Dashboard', {
+        details: 'Analyzing languages and LibreTranslate status...'
       }), { parse_mode: 'Markdown' }
     );
 
     try {
-      const languageStats = await getLanguageStatsFromDB();
-      
+      const enabledLangs = translationService.getSupportedLanguages();
+      const enabledCodes = translationService.getEnabledCodes();
+      const stats = translationService.getStats();
+      const libreStatus = await translationService.getLibreTranslateStatus();
+
+      // Build enabled languages list
+      let enabledList = '';
+      for (const [code, info] of Object.entries(enabledLangs)) {
+        enabledList += `${info.flag} ${info.name} (\`${code}\`)\n`;
+      }
+
+      const libreStatusIcon = libreStatus.apiHealthy ? '🟢' : (libreStatus.containerRunning ? '🟡' : '🔴');
+      const libreStatusText = libreStatus.apiHealthy ? 'Healthy' : (libreStatus.containerRunning ? 'Starting...' : 'Stopped');
+
       const content = uiOptimizer.formatMessage(
-        '🌍 Language Analytics Dashboard',
-        `**User Language Distribution:**\n\n` +
-        languageStats.distribution +
-        `\n\n**Translation Performance:**\n` +
-        languageStats.performance +
-        `\n\n**Market Insights:**\n` +
-        languageStats.insights,
+        '🌍 Language & Translation Dashboard',
+        `**📋 Enabled Languages (${enabledCodes.length}):**\n` +
+        enabledList +
+        `\n**📡 LibreTranslate Engine:**\n` +
+        `${libreStatusIcon} Status: ${libreStatusText}\n` +
+        `🐳 Docker: ${libreStatus.dockerAvailable ? '✅ Available' : '❌ Not found'}\n` +
+        `📦 Container: \`${libreStatus.containerName}\`\n` +
+        `🌐 API: \`${libreStatus.apiUrl}\`\n` +
+        `🔄 Auto-start: ${libreStatus.autoStart ? 'Yes' : 'No'}\n\n` +
+        `**📊 Translation Stats:**\n` +
+        `• Preloaded: ${stats.preloadedCount} entries\n` +
+        `• Runtime cache: ${stats.runtimeCacheCount} entries\n` +
+        `• Translate names: ${stats.translateNames ? 'Yes' : 'No'}`,
         { addSeparator: true, addTimestamp: true }
       );
 
       const buttons = [
         [
-          { text: '📊 Detailed Report', callback_data: 'lang_detailed' },
-          { text: '🔄 Refresh Stats', callback_data: 'panel_language_stats' }
+          { text: '➕ Add Language', callback_data: 'lang_admin_add' },
+          { text: '➖ Remove Language', callback_data: 'lang_admin_remove' }
         ],
-        [{ text: '🔙 Back to Admin', callback_data: 'cocktail_back' }]
+        [
+          { text: '🔄 Restart LibreTranslate', callback_data: 'lang_admin_restart_libre' },
+          { text: '📊 User Stats', callback_data: 'lang_detailed' }
+        ],
+        [
+          { text: '🔃 Refresh', callback_data: 'panel_language_stats' },
+          { text: '🔙 Back', callback_data: 'cocktail_back' }
+        ]
       ];
 
       return smartMessageManager.sendOrEditSmart(bot, chatId, messageId, content, {
@@ -195,11 +221,242 @@ export async function handleAdminCallback(bot, query) {
         reply_markup: { inline_keyboard: buttons }
       });
     } catch (error) {
-      logger.error('ADMIN', `Language stats error: ${error.message}`);
+      logger.error('ADMIN', `Language dashboard error: ${error.message}`);
       return smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
-        uiOptimizer.createStatusMessage('error', 'Analytics Error', {
-          details: 'Unable to load language statistics. Please try again.'
+        uiOptimizer.createStatusMessage('error', 'Dashboard Error', {
+          details: 'Unable to load language dashboard. Please try again.'
         }), { parse_mode: 'Markdown' }
+      );
+    }
+  }
+
+  // === Add Language: Show available languages ===
+  if (data === 'lang_admin_add') {
+    const disabled = translationService.getDisabledLanguages();
+    const entries = Object.entries(disabled);
+
+    if (entries.length === 0) {
+      return smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
+        uiOptimizer.formatMessage('🌍 Add Language', 'All available languages are already enabled!', { addSeparator: true }),
+        {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '🔙 Back', callback_data: 'panel_language_stats' }]] }
+        }
+      );
+    }
+
+    const content = uiOptimizer.formatMessage(
+      '➕ Add Language',
+      `Select a language to enable.\n⚠️ This will restart LibreTranslate to compile the new language model.\n\n` +
+      `**Available languages (${entries.length}):**`,
+      { addSeparator: true }
+    );
+
+    // Build language buttons (2 per row)
+    const langButtons = [];
+    for (let i = 0; i < entries.length; i += 2) {
+      const row = [];
+      for (let j = i; j < Math.min(i + 2, entries.length); j++) {
+        const [code, info] = entries[j];
+        row.push({ text: `${info.flag} ${info.name}`, callback_data: `lang_admin_enable_${code}` });
+      }
+      langButtons.push(row);
+    }
+    langButtons.push([{ text: '🔙 Back', callback_data: 'panel_language_stats' }]);
+
+    return smartMessageManager.sendOrEditSmart(bot, chatId, messageId, content, {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: langButtons }
+    });
+  }
+
+  // === Enable a specific language ===
+  if (data.startsWith('lang_admin_enable_')) {
+    const langCode = data.replace('lang_admin_enable_', '');
+    const langInfo = translationService.getAllAvailableLanguages()[langCode];
+    const langName = langInfo ? `${langInfo.flag} ${langInfo.name}` : langCode;
+
+    await smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
+      uiOptimizer.createStatusMessage('loading', `Adding ${langName}`, {
+        details: 'Recompiling LibreTranslate with new language. This may take 1-3 minutes...'
+      }), { parse_mode: 'Markdown' }
+    );
+
+    const result = await translationService.addLanguage(langCode);
+
+    if (result.success) {
+      const msg = result.reason === 'already_enabled'
+        ? `${langName} is already enabled.`
+        : `${langName} has been enabled!\n${result.recompiled ? '✅ LibreTranslate recompiled successfully.' : '⚠️ LibreTranslate recompile pending (fallback translations available).'}`;
+
+      await smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
+        uiOptimizer.formatMessage('✅ Language Added', msg, { addSeparator: true }),
+        {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [
+            [{ text: '➕ Add Another', callback_data: 'lang_admin_add' }],
+            [{ text: '🔙 Back to Languages', callback_data: 'panel_language_stats' }]
+          ]}
+        }
+      );
+    } else {
+      await smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
+        uiOptimizer.createStatusMessage('error', 'Failed to Add Language', {
+          details: `Reason: ${result.reason}`
+        }), {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '🔙 Back', callback_data: 'panel_language_stats' }]] }
+        }
+      );
+    }
+    return;
+  }
+
+  // === Remove Language: Show enabled languages ===
+  if (data === 'lang_admin_remove') {
+    const enabled = translationService.getSupportedLanguages();
+    const removable = Object.entries(enabled).filter(([code]) => code !== 'en');
+
+    if (removable.length === 0) {
+      return smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
+        uiOptimizer.formatMessage('🌍 Remove Language', 'Only English is enabled. Nothing to remove.', { addSeparator: true }),
+        {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '🔙 Back', callback_data: 'panel_language_stats' }]] }
+        }
+      );
+    }
+
+    const content = uiOptimizer.formatMessage(
+      '➖ Remove Language',
+      `Select a language to disable.\n⚠️ This will restart LibreTranslate to free resources.\n🇺🇸 English cannot be removed.\n\n` +
+      `**Enabled languages (${removable.length} removable):**`,
+      { addSeparator: true }
+    );
+
+    const langButtons = [];
+    for (let i = 0; i < removable.length; i += 2) {
+      const row = [];
+      for (let j = i; j < Math.min(i + 2, removable.length); j++) {
+        const [code, info] = removable[j];
+        row.push({ text: `❌ ${info.flag} ${info.name}`, callback_data: `lang_admin_disable_${code}` });
+      }
+      langButtons.push(row);
+    }
+    langButtons.push([{ text: '🔙 Back', callback_data: 'panel_language_stats' }]);
+
+    return smartMessageManager.sendOrEditSmart(bot, chatId, messageId, content, {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: langButtons }
+    });
+  }
+
+  // === Disable a specific language ===
+  if (data.startsWith('lang_admin_disable_')) {
+    const langCode = data.replace('lang_admin_disable_', '');
+    const langInfo = translationService.getAllAvailableLanguages()[langCode];
+    const langName = langInfo ? `${langInfo.flag} ${langInfo.name}` : langCode;
+
+    await smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
+      uiOptimizer.createStatusMessage('loading', `Removing ${langName}`, {
+        details: 'Recompiling LibreTranslate without this language...'
+      }), { parse_mode: 'Markdown' }
+    );
+
+    const result = await translationService.removeLanguage(langCode);
+
+    if (result.success) {
+      await smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
+        uiOptimizer.formatMessage('✅ Language Removed', `${langName} has been disabled.\n${result.recompiled ? '✅ LibreTranslate recompiled.' : '⚠️ Recompile pending.'}`, { addSeparator: true }),
+        {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [
+            [{ text: '➖ Remove Another', callback_data: 'lang_admin_remove' }],
+            [{ text: '🔙 Back to Languages', callback_data: 'panel_language_stats' }]
+          ]}
+        }
+      );
+    } else {
+      await smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
+        uiOptimizer.createStatusMessage('error', 'Failed to Remove', {
+          details: `Reason: ${result.reason}`
+        }), {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '🔙 Back', callback_data: 'panel_language_stats' }]] }
+        }
+      );
+    }
+    return;
+  }
+
+  // === Restart LibreTranslate ===
+  if (data === 'lang_admin_restart_libre') {
+    await smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
+      uiOptimizer.createStatusMessage('loading', 'Restarting LibreTranslate', {
+        details: 'Stopping container, removing, and starting fresh with current languages...'
+      }), { parse_mode: 'Markdown' }
+    );
+
+    const langs = translationService.getEnabledCodes();
+    const ok = await libreTranslateManager.recompileWithLanguages(langs);
+    translationService.libreAvailable = ok;
+
+    const statusMsg = ok
+      ? `✅ LibreTranslate restarted successfully!\nLanguages: ${langs.join(', ')}`
+      : `❌ LibreTranslate restart failed. Check Docker logs.`;
+
+    return smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
+      uiOptimizer.formatMessage(ok ? '✅ Restart Complete' : '❌ Restart Failed', statusMsg, { addSeparator: true }),
+      {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: '🔙 Back to Languages', callback_data: 'panel_language_stats' }]] }
+      }
+    );
+  }
+
+  // === Detailed Language User Stats ===
+  if (data === 'lang_detailed') {
+    await smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
+      uiOptimizer.createStatusMessage('loading', 'Loading User Language Stats', {
+        details: 'Querying database for user language preferences...'
+      }), { parse_mode: 'Markdown' }
+    );
+
+    try {
+      const langStats = await getRealLanguageStats();
+      const allLangs = translationService.getAllAvailableLanguages();
+
+      let statsText = '';
+      for (const row of langStats) {
+        const info = allLangs[row.language_code] || { flag: '🏳️', name: row.language_code };
+        const bar = '█'.repeat(Math.min(Math.round(row.percentage / 5), 20));
+        statsText += `${info.flag} ${info.name}: **${row.count}** users (${row.percentage}%) ${bar}\n`;
+      }
+
+      if (!statsText) statsText = 'No user language data available yet.';
+
+      const content = uiOptimizer.formatMessage(
+        '📊 User Language Distribution',
+        statsText,
+        { addSeparator: true, addTimestamp: true }
+      );
+
+      return smartMessageManager.sendOrEditSmart(bot, chatId, messageId, content, {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [
+          [{ text: '🔃 Refresh', callback_data: 'lang_detailed' }],
+          [{ text: '🔙 Back to Languages', callback_data: 'panel_language_stats' }]
+        ]}
+      });
+    } catch (error) {
+      logger.error('ADMIN', `Language user stats error: ${error.message}`);
+      return smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
+        uiOptimizer.createStatusMessage('error', 'Stats Error', {
+          details: error.message
+        }), {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '🔙 Back', callback_data: 'panel_language_stats' }]] }
+        }
       );
     }
   }
@@ -274,17 +531,30 @@ export async function handleAdminCallback(bot, query) {
   }
 }
 
-// Helper function to get language statistics
-async function getLanguageStatsFromDB() {
+// Real language statistics from database
+async function getRealLanguageStats() {
   return new Promise((resolve, reject) => {
-    // Simulated language statistics - replace with actual DB queries
-    setTimeout(() => {
-      resolve({
-        distribution: '🇺🇸 English: 45%\n🇪🇸 Spanish: 25%\n🇩🇪 German: 15%\n🇫🇷 French: 10%\n🇷🇺 Russian: 5%',
-        performance: '✅ Translation Success: 99.2%\n⚡ Avg Response Time: 120ms\n🔄 Cache Hit Rate: 87%',
-        insights: '📈 Growth: +12% this month\n🌟 Most Popular: English\n🚀 Fastest Growing: Spanish'
-      });
-    }, 1000);
+    db.all(
+      `SELECT 
+        COALESCE(language_code, 'en') as language_code,
+        COUNT(*) as count
+      FROM users 
+      GROUP BY COALESCE(language_code, 'en')
+      ORDER BY count DESC`,
+      [],
+      (err, rows) => {
+        if (err) return reject(err);
+        if (!rows || rows.length === 0) return resolve([]);
+
+        const total = rows.reduce((sum, r) => sum + r.count, 0);
+        const result = rows.map(r => ({
+          language_code: r.language_code,
+          count: r.count,
+          percentage: total > 0 ? Math.round((r.count / total) * 100) : 0
+        }));
+        resolve(result);
+      }
+    );
   });
 }
 

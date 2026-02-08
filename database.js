@@ -493,6 +493,40 @@ db.serialize(() => {
   });
 });
 
+// === Removed Users Ledger Table ===
+// Archives users removed by the daily username sync (deleted, unreachable, blocked)
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS removed_users_ledger (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      telegram_id INTEGER NOT NULL,
+      username TEXT,
+      first_name TEXT,
+      last_name TEXT,
+      language_code TEXT,
+      original_created_at TEXT,
+      last_activity TEXT,
+      removal_reason TEXT NOT NULL,
+      removal_category TEXT NOT NULL,
+      api_error_message TEXT,
+      removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      restored_at TIMESTAMP,
+      notes TEXT
+    )
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Removed users ledger table error:', err);
+    } else {
+      console.log('[DB] Removed users ledger table ready.');
+    }
+  });
+
+  // Index for quick lookups by telegram_id and category
+  db.run(`CREATE INDEX IF NOT EXISTS idx_removed_ledger_telegram_id ON removed_users_ledger(telegram_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_removed_ledger_category ON removed_users_ledger(removal_category)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_removed_ledger_removed_at ON removed_users_ledger(removed_at)`);
+});
+
 export default secureDb;
 export { db }; // Export raw db for backward compatibility
 

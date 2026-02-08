@@ -45,6 +45,7 @@ import instantTranslationService from './utils/instantTranslationService.js';
 import redisTranslationCache from './utils/redisTranslationCache.js';
 import prebuiltTranslations from './utils/prebuiltTranslations.js';
 import TelegramSafety from './utils/telegramSafety.js';
+import libreTranslateManager from './utils/libreTranslateManager.js';
 
 // Sidekick System Imports
 import { handleSidekickCallback, initializeSidekickInputHandler } from './handlers/sidekickHandler.js';
@@ -99,21 +100,43 @@ async function initializeBot() {
     await instantTranslationService.initialize();
     await messageTranslator.initialize();
     
-    // Load pre-built translations into Redis for instant response
-    logger.info('SYSTEM', 'Loading pre-built translations into Redis cache...');
+    // Initialize LibreTranslate via Docker (auto-pull, start, health check)
+    logger.info('SYSTEM', 'Initializing LibreTranslate Docker container...');
+    const libreReady = await translationService.initializeLibreTranslate();
+    if (libreReady) {
+      console.log('[✅] LibreTranslate Docker container is running and healthy');
+    } else {
+      console.log('[⚠️] LibreTranslate unavailable - using fallback translations only');
+    }
+    
+    // Preload all UI template translations into memory for instant responses
+    logger.info('SYSTEM', 'Preloading UI translations for enabled languages...');
+    const uiTemplates = messageTranslator.getTemplates();
+    const preloadedCount = await translationService.preloadAllUITranslations(uiTemplates);
+    logger.info('SYSTEM', `UI translations preloaded: ${preloadedCount} entries`);
+    
+    // Load pre-built translations into memory (from generated JSON files)
+    logger.info('SYSTEM', 'Loading pre-built translations...');
     const translationsLoaded = await prebuiltTranslations.loadTranslations();
     if (translationsLoaded) {
       const translationsData = prebuiltTranslations.getAllTranslations();
       if (translationsData && Object.keys(translationsData).length > 0) {
+        // Load prebuilt data directly into translationService memory
+        translationService.loadPrebuiltData(translationsData);
+        // Also push to Redis for instantTranslationService
         await instantTranslationService.preloadTranslationsToRedis(translationsData);
-        logger.info('SYSTEM', 'Pre-built translations loaded into Redis for instant response');
+        logger.info('SYSTEM', 'Pre-built translations loaded into memory + Redis');
       }
       
       const stats = prebuiltTranslations.getStats();
       logger.info('SYSTEM', `Translation system ready: ${stats.cacheSize} entries loaded`);
     } else {
-      logger.warn('SYSTEM', 'Pre-built translations not available, using live translation with Redis cache');
+      logger.warn('SYSTEM', 'Pre-built translations not available, using live translation + fallbacks');
     }
+    
+    // Log translation service stats
+    const translationStats = translationService.getStats();
+    logger.info('SYSTEM', `Translation config: ${translationStats.enabledLanguages.join(',')} | Preloaded: ${translationStats.preloadedCount} | Names translated: ${translationStats.translateNames}`);
     
     // Run database migrations for backward compatibility
     logger.info('SYSTEM', 'Running database migrations...');
@@ -176,6 +199,7 @@ async function initializeBot() {
     console.log('[✅] Telegram Digital Store is live with full Sidekick System.');
     console.log('[🚀] All features are production-ready and encrypted.');
     console.log('[🔐] Database migrations completed - backward compatible.');
+    console.log(`[🌍] Translation: ${translationService.getEnabledCodes().join(',')} | LibreTranslate: ${translationService.libreAvailable ? 'Online' : 'Fallback mode'}`);
     
   } catch (error) {
     logger.error('SYSTEM', 'Bot initialization failed', error);
@@ -313,8 +337,8 @@ bot.sendMessage(
   `🟢 **Status:** Online & Ready\n` +
   `🤖 **Sidekick System:** Active\n` +
   `🔐 **Encryption:** Enabled\n` +
-  `🌍 **Multi-Language:** Active\n` +
-  `📡 **LibreTranslate:** Ready\n` +
+  `🌍 **Multi-Language:** ${translationService.getEnabledCodes().join(', ')}\n` +
+  `📡 **LibreTranslate:** ${translationService.libreAvailable ? '🟢 Docker Running' : '🟡 Fallback Mode'}\n` +
   `⚡ **Performance:** Optimized\n\n` +
   `━━━━━━━━━━━━━━━━━━━━━\n` +
   `🕒 **Restart Time:** ${new Date().toLocaleString()}\n` +
@@ -322,7 +346,7 @@ bot.sendMessage(
   `🛡️ **Security Level:** Maximum\n\n` +
   `💡 **System Ready:**\n` +
   `• Payment processing active\n` +
-  `• Translation services online\n` +
+  `• Translation engine: ${translationService.libreAvailable ? 'LibreTranslate (Docker)' : 'Fallback translations'}\n` +
   `• Admin panel accessible via /cocktail\n` +
   `• All security measures enabled`,
   { parse_mode: 'Markdown' }
@@ -335,15 +359,15 @@ bot.sendMessage(
     `🟢 Status: Online & Ready\n` +
     `🤖 Sidekick System: Active\n` +
     `🔐 Encryption: Enabled\n` +
-    `🌍 Multi-Language: Active\n` +
-    `📡 LibreTranslate: Ready\n` +
+    `🌍 Multi-Language: ${translationService.getEnabledCodes().join(', ')}\n` +
+    `📡 LibreTranslate: ${translationService.libreAvailable ? 'Docker Running' : 'Fallback Mode'}\n` +
     `⚡ Performance: Optimized\n\n` +
     `🕒 Restart Time: ${new Date().toLocaleString()}\n` +
     `🔧 Version: 2.0.0\n` +
     `🛡️ Security Level: Maximum\n\n` +
     `💡 System Ready:\n` +
     `• Payment processing active\n` +
-    `• Translation services online\n` +
+    `• Translation engine: ${translationService.libreAvailable ? 'LibreTranslate (Docker)' : 'Fallback translations'}\n` +
     `• Admin panel accessible via /cocktail\n` +
     `• All security measures enabled`
   ).catch(e => console.error('[Fallback Message Error]', e.message));
@@ -382,6 +406,7 @@ bot.onText(/^\/(addcategory|addsubcategory|addproduct)(.*)/, (msg) => {
 bot.onText(/\/cocktail/, (msg) => handleAdminCommand(bot, msg));
 bot.onText(/\/poke/, (msg) => handlePokeCommand(bot, msg));
 bot.onText(/\/merger/, (msg) => usernameNormalizer.handleMergerCommand(bot, msg));
+bot.onText(/\/ledger/, (msg) => usernameNormalizer.handleLedgerCommand(bot, msg));
 bot.onText(/\/heads/, (msg) => adminManager.handleHeadsCommand(bot, msg));
 bot.onText(/\/tomcat/, (msg) => handleTomcatCommand(bot, msg));
 bot.onText(/\/promote/, (msg) => adminManager.handlePromoteCommand(bot, msg));
@@ -449,6 +474,11 @@ bot.on('callback_query', async (query) => {
       if (now - timestamp > 300000) {
         callbackCooldowns.delete(key);
       }
+    }
+
+    // ADMIN LANGUAGE MANAGEMENT (must come before general lang_ handler)
+    if (data.startsWith('lang_admin_') || data === 'lang_detailed') {
+      return handleAdminCallback(bot, query);
     }
 
     // LANGUAGE SELECTION

@@ -32,11 +32,13 @@ export async function handleCategoryNavigation(bot, query) {
 
     const buttons = [];
     
-    // Translate subcategory names
+    // Show subcategory names - only translate if configured to do so
     for (const subcat of subcategories) {
-      const translatedName = await instantTranslationService.getTranslation(subcat.name, query.from.id);
+      const displayName = translationService.shouldTranslateNames()
+        ? await instantTranslationService.getTranslation(subcat.name, query.from.id)
+        : subcat.name;
       buttons.push([{
-        text: `📁 ${translatedName}`,
+        text: `📁 ${displayName}`,
         callback_data: `cat_${subcat.id}`
       }]);
     }
@@ -49,7 +51,11 @@ export async function handleCategoryNavigation(bot, query) {
 
     // Get parent category name for header
     db.get(`SELECT name FROM categories WHERE id = ?`, [categoryId], async (err, parent) => {
-      const parentName = parent ? await instantTranslationService.getTranslation(parent.name, query.from.id) : 'Category';
+      const parentName = parent
+        ? (translationService.shouldTranslateNames()
+            ? await instantTranslationService.getTranslation(parent.name, query.from.id)
+            : parent.name)
+        : 'Category';
       const headerText = await messageTranslator.translateTemplateForUser('select_category', query.from.id);
 
       // Use smart editing that preserves photo banners when possible

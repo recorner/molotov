@@ -37,6 +37,11 @@ class InstantTranslationService {
       return templateText || templateKey;
     }
 
+    // Skip if language is not enabled in env
+    if (!translationService.isLanguageEnabled(language)) {
+      return templateText || templateKey;
+    }
+
     try {
       // 1. Try Redis cache first (instant response)
       if (this.isRedisEnabled) {
@@ -46,26 +51,24 @@ class InstantTranslationService {
         }
       }
 
-      // 2. In instant mode, return English if not cached
-      if (this.instantMode) {
-        logger.debug('INSTANT_TRANS', `Instant mode: returning English for ${templateKey}:${language}`);
-        return templateText || templateKey;
-      }
-
-      // 3. Fallback to LibreTranslate (slower)
-      if (this.fallbackToLibreTranslate && templateText) {
+      // 2. Use translationService.translate() which checks:
+      //    - preloadedUI (in-memory, instant)
+      //    - runtime cache (in-memory, instant)
+      //    - fallback hardcoded translations (instant)
+      //    - LibreTranslate API (only if available, skipped in instant mode)
+      if (templateText) {
         const translation = await translationService.translate(templateText, language);
         
         if (translation && translation !== templateText) {
-          // Cache the translation for next time
+          // Cache the successful translation in Redis for next time
           if (this.isRedisEnabled) {
-            await redisTranslationCache.setTranslation(templateKey, language, translation);
+            await redisTranslationCache.setTranslation(templateKey, language, translation).catch(() => {});
           }
           return translation;
         }
       }
 
-      // 4. Final fallback to English
+      // 3. Final fallback to English
       return templateText || templateKey;
 
     } catch (error) {
@@ -169,21 +172,19 @@ class InstantTranslationService {
     }
   }
 
-  // Get supported languages from environment
+  // Get supported languages from translationService (single source of truth from env)
   getSupportedLanguages() {
-    const envLanguages = process.env.SUPPORTED_LANGUAGES;
-    if (!envLanguages) {
-      // Fallback to a basic set
-      return ['es', 'fr', 'de', 'it', 'pt', 'ru', 'zh', 'ja'];
-    }
-
-    return envLanguages.split(',').map(lang => lang.trim()).filter(lang => lang);
+    return translationService.getEnabledCodes().filter(c => c !== 'en');
   }
 
   // Check if language is supported
   isLanguageSupported(language) {
-    if (language === 'en') return true;
-    return this.getSupportedLanguages().includes(language);
+    return translationService.isLanguageEnabled(language);
+  }
+
+  // Whether product/category names should be translated
+  shouldTranslateNames() {
+    return translationService.shouldTranslateNames();
   }
 }
 
