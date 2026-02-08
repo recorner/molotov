@@ -103,6 +103,8 @@ async function initializeBot() {
     
     // Initialize LibreTranslate via Docker (auto-pull, start, health check)
     logger.info('SYSTEM', 'Initializing LibreTranslate Docker container...');
+    // Tell LibreTranslate which languages to load (from translationService enabled languages)
+    libreTranslateManager.setEnabledLanguages(translationService.getEnabledCodes());
     const libreReady = await translationService.initializeLibreTranslate();
     if (libreReady) {
       console.log('[✅] LibreTranslate Docker container is running and healthy');

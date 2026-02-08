@@ -3,7 +3,6 @@ import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import logger from './logger.js';
 import {
-  AVAILABLE_LANGUAGES,
   LIBRETRANSLATE_URL,
   LIBRETRANSLATE_PORT,
   LIBRETRANSLATE_CONTAINER_NAME,
@@ -19,8 +18,8 @@ class LibreTranslateManager {
     this.apiUrl = LIBRETRANSLATE_URL;
     this.imageName = 'libretranslate/libretranslate:latest';
     this.autoStart = LIBRETRANSLATE_AUTO_START;
-    // Load ALL available languages into Docker so no recompile is needed
-    this.currentLanguages = [...AVAILABLE_LANGUAGES];
+    // Languages to load into Docker (set via setEnabledLanguages before ensureRunning)
+    this.currentLanguages = ['en'];  // Start with English only, will be updated
     this.isReady = false;
     this.startupPromise = null;
 
@@ -35,8 +34,24 @@ class LibreTranslateManager {
   // ═══════════════════════════════════════
 
   /**
+   * Set the languages that should be loaded in Docker.
+   * Call this BEFORE ensureRunning() to specify which languages to compile.
+   * @param {string[]} languageCodes - Array of language codes (e.g., ['en', 'fr', 'de'])
+   */
+  setEnabledLanguages(languageCodes) {
+    if (!Array.isArray(languageCodes) || languageCodes.length === 0) {
+      logger.warn('LIBRETRANSLATE', 'setEnabledLanguages called with empty array, keeping current');
+      return;
+    }
+    // Ensure 'en' is always included
+    this.currentLanguages = ['en', ...languageCodes.filter(c => c !== 'en')];
+    logger.info('LIBRETRANSLATE', `Set enabled languages: ${this.currentLanguages.join(', ')}`);
+  }
+
+  /**
    * Ensure LibreTranslate is running and healthy.
    * Called during bot startup. Will pull image + start container if needed.
+   * MUST call setEnabledLanguages() BEFORE this.
    * Returns true if service is ready, false if unavailable.
    */
   async ensureRunning() {
