@@ -3,7 +3,7 @@ import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import logger from './logger.js';
 import {
-  ENABLED_LANGUAGES,
+  AVAILABLE_LANGUAGES,
   LIBRETRANSLATE_URL,
   LIBRETRANSLATE_PORT,
   LIBRETRANSLATE_CONTAINER_NAME,
@@ -19,7 +19,8 @@ class LibreTranslateManager {
     this.apiUrl = LIBRETRANSLATE_URL;
     this.imageName = 'libretranslate/libretranslate:latest';
     this.autoStart = LIBRETRANSLATE_AUTO_START;
-    this.currentLanguages = [...ENABLED_LANGUAGES];
+    // Load ALL available languages into Docker so no recompile is needed
+    this.currentLanguages = [...AVAILABLE_LANGUAGES];
     this.isReady = false;
     this.startupPromise = null;
 

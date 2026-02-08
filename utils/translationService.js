@@ -1,17 +1,17 @@
-// utils/translationService.js - Multi-language translation service (env-driven)
+// utils/translationService.js - Multi-language translation service (state-driven)
 import logger from './logger.js';
 import db from '../database.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
-  ENABLED_LANGUAGES,
+  AVAILABLE_LANGUAGES,
   DEFAULT_LANGUAGE,
   TRANSLATE_PRODUCT_NAMES,
   LIBRETRANSLATE_URL,
-  PRELOAD_TRANSLATIONS
 } from '../config.js';
 import libreTranslateManager from './libreTranslateManager.js';
+import stateManager from './stateManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,8 +47,18 @@ class TranslationService {
       'el': { name: 'Ελληνικά', flag: '🇬🇷' }
     };
 
-    // Enabled languages from env (always includes en)
-    this.enabledCodes = ENABLED_LANGUAGES;
+    // Restore enabled languages from persisted state, fallback to AVAILABLE_LANGUAGES
+    const persisted = stateManager.get('enabled_languages');
+    if (persisted && Array.isArray(persisted) && persisted.length > 0) {
+      this.enabledCodes = ['en', ...persisted.filter(c => c !== 'en' && this.allLanguages[c])];
+      logger.info('TRANSLATION', `Restored enabled languages from state: ${this.enabledCodes.join(', ')}`);
+    } else {
+      // First boot or no state — use AVAILABLE_LANGUAGES as initial enabled set
+      this.enabledCodes = [...AVAILABLE_LANGUAGES].filter(c => this.allLanguages[c]);
+      this._persistEnabledLanguages();
+      logger.info('TRANSLATION', `No saved languages found, using available: ${this.enabledCodes.join(', ')}`);
+    }
+
     this.supportedLanguages = {};
     for (const code of this.enabledCodes) {
       if (this.allLanguages[code]) {
@@ -60,12 +70,11 @@ class TranslationService {
     this.translationCache = new Map();
     this.cacheExpiry = 24 * 60 * 60 * 1000; // 24 h
 
-    // Pre-loaded UI translations (filled at startup)
+    // Pre-loaded UI translations (filled at startup or on-demand)
     this.preloadedUI = new Map(); // key = `text:lang` value = translated string
 
     // Config flags
     this.translateProductNames = TRANSLATE_PRODUCT_NAMES;
-    this.preloadEnabled = PRELOAD_TRANSLATIONS;
     this.defaultLanguage = DEFAULT_LANGUAGE;
 
     // Comprehensive fallback translations
@@ -73,6 +82,11 @@ class TranslationService {
 
     logger.info('TRANSLATION', `Initialized with ${this.enabledCodes.length} languages: ${this.enabledCodes.join(', ')}`);
     logger.info('TRANSLATION', `Translate product/category names: ${this.translateProductNames}`);
+  }
+
+  /** Persist current enabled languages to encrypted state */
+  _persistEnabledLanguages() {
+    stateManager.set('enabled_languages', [...this.enabledCodes]);
   }
 
   // ═══════════════════════════════════════
@@ -199,17 +213,17 @@ class TranslationService {
   // -- Preloading --
 
   /**
-   * Preload all UI template translations into memory.
-   * Called once at startup from bot.js.
+   * Preload UI template translations into memory.
+   * SMART: Only translates what's missing from the preloadedUI map.
+   * If prebuilt data was already loaded, this becomes a near-instant no-op.
+   * @param {Object} templates - { key: englishText }
+   * @returns {number} count of translations loaded
    */
   async preloadAllUITranslations(templates) {
-    if (!this.preloadEnabled) {
-      logger.info('TRANSLATION', 'Preloading disabled by config');
-      return 0;
-    }
-
     const startTime = Date.now();
     let count = 0;
+    let skipped = 0;
+    let translated = 0;
 
     for (const lang of this.enabledCodes) {
       if (lang === 'en') continue;
@@ -218,9 +232,10 @@ class TranslationService {
         const cacheKeyByKey = `${key}:${lang}`;
         const cacheKeyByText = this.getCacheKey(englishText, lang);
 
-        if (this.preloadedUI.has(cacheKeyByKey)) { count++; continue; }
+        // Already in memory — skip (instant)
+        if (this.preloadedUI.has(cacheKeyByKey)) { skipped++; count++; continue; }
 
-        // Try fallback first
+        // Try fallback first (instant)
         const fb = this.getFallbackTranslation(englishText, lang);
         if (fb !== englishText) {
           this.preloadedUI.set(cacheKeyByKey, fb);
@@ -229,13 +244,14 @@ class TranslationService {
           continue;
         }
 
-        // Try LibreTranslate
+        // Try LibreTranslate (slow — only for missing entries)
         if (this.libreAvailable) {
           try {
-            const translated = await this.translateWithLibre(englishText, lang);
-            if (translated && translated !== englishText) {
-              this.preloadedUI.set(cacheKeyByKey, translated);
-              this.preloadedUI.set(cacheKeyByText, translated);
+            const result = await this.translateWithLibre(englishText, lang);
+            if (result && result !== englishText) {
+              this.preloadedUI.set(cacheKeyByKey, result);
+              this.preloadedUI.set(cacheKeyByText, result);
+              translated++;
               count++;
             }
           } catch { /* skip */ }
@@ -244,7 +260,11 @@ class TranslationService {
     }
 
     const elapsed = Date.now() - startTime;
-    logger.info('TRANSLATION', `Preloaded ${count} UI translations for ${this.enabledCodes.length - 1} languages in ${elapsed}ms`);
+    if (translated > 0) {
+      logger.info('TRANSLATION', `Preloaded ${count} UI translations (${skipped} cached, ${translated} new) for ${this.enabledCodes.length - 1} languages in ${elapsed}ms`);
+    } else {
+      logger.info('TRANSLATION', `UI translations verified: ${count} entries, all cached (${elapsed}ms)`);
+    }
     return count;
   }
 
@@ -340,7 +360,8 @@ class TranslationService {
 
   /**
    * Dynamically add a language at runtime.
-   * Updates internal state and triggers LibreTranslate recompile.
+   * Updates internal state, persists to bot state.
+   * No Docker recompile needed — AVAILABLE_LANGUAGES are pre-loaded.
    */
   async addLanguage(code) {
     code = code.toLowerCase().trim();
@@ -356,15 +377,25 @@ class TranslationService {
     this.enabledCodes.push(code);
     this.supportedLanguages[code] = this.allLanguages[code];
 
-    // Trigger LibreTranslate recompile with new language set
-    logger.info('TRANSLATION', `Adding language: ${code} (${this.allLanguages[code].name})`);
-    const recompileOk = await libreTranslateManager.addLanguage(code);
+    // Persist to encrypted state
+    this._persistEnabledLanguages();
+
+    // Check if LibreTranslate already has this language loaded
+    const loadedLangs = await libreTranslateManager.getLoadedLanguages();
+    let recompileOk = true;
+    if (!loadedLangs.includes(code)) {
+      // Language not in Docker yet — need recompile
+      logger.info('TRANSLATION', `Language ${code} not in Docker, triggering recompile...`);
+      recompileOk = await libreTranslateManager.addLanguage(code);
+    } else {
+      logger.info('TRANSLATION', `Language ${code} already in Docker — no recompile needed`);
+    }
 
     if (recompileOk) {
       this.libreAvailable = true;
-      logger.info('TRANSLATION', `Language ${code} added and LibreTranslate recompiled`);
+      logger.info('TRANSLATION', `Language ${code} (${this.allLanguages[code].name}) enabled`);
     } else {
-      logger.warn('TRANSLATION', `Language ${code} added but LibreTranslate recompile failed (fallbacks available)`);
+      logger.warn('TRANSLATION', `Language ${code} enabled but LibreTranslate recompile failed`);
     }
 
     return { success: true, recompiled: recompileOk };
@@ -372,7 +403,8 @@ class TranslationService {
 
   /**
    * Dynamically remove a language at runtime.
-   * Updates internal state and triggers LibreTranslate recompile.
+   * Updates internal state, persists to bot state.
+   * Does NOT recompile Docker — languages stay available for re-enabling.
    */
   async removeLanguage(code) {
     code = code.toLowerCase().trim();
@@ -387,6 +419,9 @@ class TranslationService {
     this.enabledCodes = this.enabledCodes.filter(c => c !== code);
     delete this.supportedLanguages[code];
 
+    // Persist to encrypted state
+    this._persistEnabledLanguages();
+
     // Clean preloaded translations for this language
     for (const key of this.preloadedUI.keys()) {
       if (key.endsWith(`:${code}`)) {
@@ -394,11 +429,8 @@ class TranslationService {
       }
     }
 
-    // Trigger LibreTranslate recompile
-    logger.info('TRANSLATION', `Removing language: ${code}`);
-    const recompileOk = await libreTranslateManager.removeLanguage(code);
-
-    return { success: true, recompiled: recompileOk };
+    logger.info('TRANSLATION', `Language ${code} disabled (Docker untouched — still available)`);
+    return { success: true, recompiled: false };
   }
 
   /**
@@ -523,6 +555,183 @@ class TranslationService {
       redis: redisOk,
       duration
     };
+  }
+
+  /**
+   * Build translations for a SINGLE new language only.
+   * Loads existing prebuilt data, adds the new language, saves back.
+   * Much faster than full rebuild — only translates ~200 templates × 1 language.
+   */
+  async buildForSingleLanguage(langCode) {
+    const startTime = Date.now();
+    const outputDir = path.join(__dirname, '../generated/translations');
+
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    const { default: messageTranslator } = await import('../utils/messageTranslator.js');
+    const { default: instantTranslationService } = await import('../utils/instantTranslationService.js');
+
+    await this.testConnection();
+
+    const templates = messageTranslator.getTemplates();
+    const templateKeys = Object.keys(templates);
+
+    // Load existing prebuilt data from disk (so we don't lose other languages)
+    const allPath = path.join(outputDir, 'all.json');
+    let translationsData = { en: { ...templates } };
+    if (fs.existsSync(allPath)) {
+      try {
+        const existing = JSON.parse(fs.readFileSync(allPath, 'utf8'));
+        translationsData = { ...existing, en: { ...templates } };
+      } catch { /* start fresh if corrupt */ }
+    }
+
+    logger.info('TRANSLATION', `Building translations for ${langCode}: ${templateKeys.length} templates`);
+
+    // Translate only the new language
+    translationsData[langCode] = {};
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const key of templateKeys) {
+      const text = templates[key];
+      try {
+        const translated = await Promise.race([
+          this.translate(text, langCode),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000))
+        ]);
+        if (translated && translated !== text && translated.length > 0) {
+          translationsData[langCode][key] = translated;
+          successCount++;
+        } else {
+          translationsData[langCode][key] = text;
+          failCount++;
+        }
+      } catch {
+        translationsData[langCode][key] = text;
+        failCount++;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    // Save updated data to disk
+    await this._saveTranslationsToDisk(outputDir, translationsData, templateKeys);
+
+    // Load only the new language into memory
+    for (const [key, value] of Object.entries(translationsData[langCode])) {
+      this.preloadedUI.set(`${key}:${langCode}`, value);
+    }
+
+    // Push to Redis
+    let redisOk = false;
+    try {
+      await instantTranslationService.preloadTranslationsToRedis({ [langCode]: translationsData[langCode] });
+      redisOk = true;
+    } catch (err) {
+      logger.warn('TRANSLATION', `Redis load failed: ${err.message}`);
+    }
+
+    const duration = Date.now() - startTime;
+    const eff = Math.round((successCount / Math.max(successCount + failCount, 1)) * 100);
+    logger.info('TRANSLATION', `Single-language build (${langCode}) done in ${duration}ms: ${successCount} ok, ${failCount} fail (${eff}%)`);
+
+    return { built: successCount, failed: failCount, redis: redisOk, duration };
+  }
+
+  /**
+   * Remove a language from prebuilt translation files.
+   * Instant — no translation API calls needed.
+   */
+  async removeLanguageTranslations(langCode) {
+    const startTime = Date.now();
+    const outputDir = path.join(__dirname, '../generated/translations');
+    const allPath = path.join(outputDir, 'all.json');
+
+    const { default: messageTranslator } = await import('../utils/messageTranslator.js');
+    const { default: instantTranslationService } = await import('../utils/instantTranslationService.js');
+
+    // Remove from preloaded UI memory
+    let removedCount = 0;
+    for (const key of this.preloadedUI.keys()) {
+      if (key.endsWith(`:${langCode}`)) {
+        this.preloadedUI.delete(key);
+        removedCount++;
+      }
+    }
+
+    // Remove from disk
+    if (fs.existsSync(allPath)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(allPath, 'utf8'));
+        delete data[langCode];
+        
+        const templates = messageTranslator.getTemplates();
+        const templateKeys = Object.keys(templates);
+        await this._saveTranslationsToDisk(outputDir, data, templateKeys);
+      } catch (err) {
+        logger.warn('TRANSLATION', `Failed to clean disk translations for ${langCode}: ${err.message}`);
+      }
+    }
+
+    // Remove per-language file
+    const langFile = path.join(outputDir, `${langCode}.json`);
+    if (fs.existsSync(langFile)) {
+      try { fs.unlinkSync(langFile); } catch { /* ignore */ }
+    }
+
+    // Flush from Redis
+    try {
+      await instantTranslationService.removeLanguageFromRedis(langCode);
+    } catch { /* non-fatal */ }
+
+    const duration = Date.now() - startTime;
+    logger.info('TRANSLATION', `Removed ${langCode} translations: ${removedCount} entries cleaned in ${duration}ms`);
+    return { removed: removedCount, duration };
+  }
+
+  /**
+   * Save translations data + metadata to disk.
+   * Internal helper shared by buildAndLoad and buildForSingleLanguage.
+   */
+  async _saveTranslationsToDisk(outputDir, translationsData, templateKeys) {
+    const allPath = path.join(outputDir, 'all.json');
+    await fs.promises.writeFile(allPath, JSON.stringify(translationsData, null, 2), 'utf8');
+
+    for (const [lang, data] of Object.entries(translationsData)) {
+      await fs.promises.writeFile(
+        path.join(outputDir, `${lang}.json`),
+        JSON.stringify(data, null, 2), 'utf8'
+      );
+    }
+
+    const targetLanguages = Object.keys(translationsData).filter(c => c !== 'en');
+    let totalSuccess = 0;
+    let totalFail = 0;
+    for (const lang of targetLanguages) {
+      const langTemplates = translationsData[lang] || {};
+      for (const key of templateKeys) {
+        const val = langTemplates[key];
+        // If translation equals English original, count as "fail" (untranslated)
+        if (val && val !== translationsData.en?.[key]) totalSuccess++;
+        else totalFail++;
+      }
+    }
+
+    const metadata = {
+      buildTime: new Date().toISOString(),
+      totalTemplates: templateKeys.length,
+      totalLanguages: targetLanguages.length + 1,
+      successfulTranslations: totalSuccess,
+      failedTranslations: totalFail,
+      efficiency: Math.round((totalSuccess / Math.max(totalSuccess + totalFail, 1)) * 100),
+      supportedLanguages: targetLanguages
+    };
+    await fs.promises.writeFile(
+      path.join(outputDir, 'metadata.json'),
+      JSON.stringify(metadata, null, 2), 'utf8'
+    );
   }
 
   /**

@@ -206,8 +206,7 @@ async function enableLanguage(bot, chatId, messageId, langCode, userId) {
   // Show progress immediately
   await smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
     `⏳ **Adding ${langName}...**\n\n` +
-    `🐳 Recompiling translation engine\n` +
-    `This may take 1-3 minutes...`,
+    `� Enabling language & building translations...`,
     { parse_mode: 'Markdown' }
   );
 
@@ -223,17 +222,38 @@ async function enableLanguage(bot, chatId, messageId, langCode, userId) {
     );
   }
 
-  // Now run the background translation pipeline
+  // Build translations for ONLY the new language (not a full rebuild)
   await smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
     `✅ **${langName} enabled!**\n\n` +
-    `${result.recompiled ? '🐳 Engine recompiled' : '⚠️ Engine recompile pending'}\n` +
-    `⏳ Building translations in background...`,
+    `💾 Language saved to bot state\n` +
+    `⏳ Building translations for ${langName} only...`,
     { parse_mode: 'Markdown' }
   );
 
-  // Run background build + Redis load (non-blocking for the admin)
-  runTranslationPipeline(bot, chatId, messageId, langName).catch(err => {
-    logger.error('LINGO', `Translation pipeline failed: ${err.message}`);
+  // Non-blocking single-language build
+  translationService.buildForSingleLanguage(langCode).then(buildResult => {
+    smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
+      `✅ **${langName} - Ready!**\n\n` +
+      `💾 Built: ${buildResult.built} translations\n` +
+      `📡 Redis: ${buildResult.redis ? 'Loaded' : 'Skipped'}\n` +
+      `⏱️ ${buildResult.duration}ms`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [
+          [{ text: '➕ Add Another', callback_data: 'lingo_add' }],
+          [{ text: '🔙 Back', callback_data: 'lingo_home' }]
+        ]}
+      }
+    );
+  }).catch(err => {
+    logger.error('LINGO', `Single-language build failed: ${err.message}`);
+    smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
+      `⚠️ **${langName} enabled** but translation build had errors.\n${err.message}`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: '🔙 Back', callback_data: 'lingo_home' }]] }
+      }
+    );
   });
 }
 
@@ -283,7 +303,7 @@ async function disableLanguage(bot, chatId, messageId, langCode, userId) {
   const langName = langInfo ? `${langInfo.flag} ${langInfo.name}` : langCode;
 
   await smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
-    `⏳ **Removing ${langName}...**\n\n🐳 Recompiling translation engine...`,
+    `⏳ **Removing ${langName}...**`,
     { parse_mode: 'Markdown' }
   );
 
@@ -299,17 +319,22 @@ async function disableLanguage(bot, chatId, messageId, langCode, userId) {
     );
   }
 
-  // Run background rebuild
-  await smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
-    `✅ **${langName} removed!**\n\n` +
-    `${result.recompiled ? '🐳 Engine recompiled' : '⚠️ Recompile pending'}\n` +
-    `⏳ Rebuilding translations...`,
-    { parse_mode: 'Markdown' }
-  );
+  // Clean up translations for removed language (instant — no API calls)
+  const cleanResult = await translationService.removeLanguageTranslations(langCode);
 
-  runTranslationPipeline(bot, chatId, messageId, `Removed ${langName}`).catch(err => {
-    logger.error('LINGO', `Translation pipeline failed: ${err.message}`);
-  });
+  return smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
+    `✅ **${langName} removed!**\n\n` +
+    `💾 Language state saved\n` +
+    `🗑️ Cleaned ${cleanResult.removed} cached translations\n` +
+    `⏱️ ${cleanResult.duration}ms`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [
+        [{ text: '➖ Remove Another', callback_data: 'lingo_remove' }],
+        [{ text: '🔙 Back', callback_data: 'lingo_home' }]
+      ]}
+    }
+  );
 }
 
 // ═══════════════════════════════════════
@@ -449,44 +474,6 @@ async function showLibreStatus(bot, chatId, messageId) {
       [{ text: '🔙 Back', callback_data: 'lingo_home' }]
     ]}
   });
-}
-
-// ═══════════════════════════════════════
-//  BACKGROUND TRANSLATION PIPELINE
-// ═══════════════════════════════════════
-
-/**
- * Runs build-translations + load-to-redis in the background.
- * Updates the admin message when done.
- */
-async function runTranslationPipeline(bot, chatId, messageId, contextLabel) {
-  try {
-    const result = await translationService.buildAndLoadTranslations();
-
-    await smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
-      `✅ **${contextLabel} - Complete!**\n\n` +
-      `📝 UI preloaded: ${result.preloaded} entries\n` +
-      `💾 Templates built: ${result.built} entries\n` +
-      `📡 Redis: ${result.redis ? 'Loaded' : 'Skipped'}\n` +
-      `⏱️ ${result.duration}ms`,
-      {
-        parse_mode: 'Markdown',
-        reply_markup: { inline_keyboard: [
-          [{ text: '➕ Add Another', callback_data: 'lingo_add' }],
-          [{ text: '🔙 Back', callback_data: 'lingo_home' }]
-        ]}
-      }
-    );
-  } catch (error) {
-    logger.error('LINGO', `Pipeline error: ${error.message}`);
-    await smartMessageManager.sendOrEditSmart(bot, chatId, messageId,
-      `⚠️ **${contextLabel}**\n\nLanguage updated but translation rebuild had errors.\n${error.message}`,
-      {
-        parse_mode: 'Markdown',
-        reply_markup: { inline_keyboard: [[{ text: '🔙 Back', callback_data: 'lingo_home' }]] }
-      }
-    );
-  }
 }
 
 // ═══════════════════════════════════════

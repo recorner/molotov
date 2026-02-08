@@ -110,31 +110,53 @@ async function initializeBot() {
       console.log('[⚠️] LibreTranslate unavailable - using fallback translations only');
     }
     
-    // Preload all UI template translations into memory for instant responses
-    logger.info('SYSTEM', 'Preloading UI translations for enabled languages...');
-    const uiTemplates = messageTranslator.getTemplates();
-    const preloadedCount = await translationService.preloadAllUITranslations(uiTemplates);
-    logger.info('SYSTEM', `UI translations preloaded: ${preloadedCount} entries`);
-    
-    // Load pre-built translations into memory (from generated JSON files)
+    // ═══ SMART TRANSLATION LOADING ═══
+    // 1. Try loading pre-built translations from disk (instant, <10ms)
     logger.info('SYSTEM', 'Loading pre-built translations...');
     const translationsLoaded = await prebuiltTranslations.loadTranslations();
+    
     if (translationsLoaded) {
       const translationsData = prebuiltTranslations.getAllTranslations();
       if (translationsData && Object.keys(translationsData).length > 0) {
-        // Load prebuilt data directly into translationService memory
+        // Load prebuilt data into memory + Redis
         translationService.loadPrebuiltData(translationsData);
-        // Also push to Redis for instantTranslationService
         await instantTranslationService.preloadTranslationsToRedis(translationsData);
         logger.info('SYSTEM', 'Pre-built translations loaded into memory + Redis');
       }
       
       const stats = prebuiltTranslations.getStats();
       logger.info('SYSTEM', `Translation system ready: ${stats.cacheSize} entries loaded`);
+      
+      // 2. Check if prebuilt data covers all enabled languages + current template count
+      const enabledLangs = translationService.getEnabledCodes().filter(c => c !== 'en');
+      const builtLangs = stats.metadata?.supportedLanguages || [];
+      const builtTemplateCount = stats.metadata?.totalTemplates || 0;
+      const currentTemplateCount = Object.keys(messageTranslator.getTemplates()).length;
+      const missingLangs = enabledLangs.filter(l => !builtLangs.includes(l));
+      const hasNewTemplates = currentTemplateCount > builtTemplateCount;
+      
+      if (missingLangs.length > 0 || hasNewTemplates) {
+        // New languages or templates added since last build — rebuild in background
+        const reason = missingLangs.length > 0 
+          ? `new languages: ${missingLangs.join(', ')}`
+          : `new templates: ${currentTemplateCount} vs ${builtTemplateCount} built`;
+        logger.info('SYSTEM', `Translations outdated (${reason}). Rebuilding in background...`);
+        console.log(`[🔄] Translation rebuild needed: ${reason}`);
+        
+        // Non-blocking background rebuild
+        translationService.buildAndLoadTranslations().then(result => {
+          logger.info('SYSTEM', `Background rebuild complete: ${result.built} ok, ${result.failed} fail (${result.duration}ms)`);
+          console.log(`[✅] Background translation rebuild done: ${result.built} entries`);
+        }).catch(err => {
+          logger.warn('SYSTEM', `Background rebuild failed (non-fatal): ${err.message}`);
+        });
+      } else {
+        logger.info('SYSTEM', 'Pre-built translations are fresh — skipping preload');
+      }
     } else {
-      // Pre-built translations don't exist — build them now if LibreTranslate is available
+      // No pre-built translations on disk — build them if LibreTranslate is available
       if (libreReady) {
-        logger.info('SYSTEM', 'Pre-built translations not found. Building now (this may take 30-60s)...');
+        logger.info('SYSTEM', 'No pre-built translations found. Building now (this may take 30-60s)...');
         try {
           const buildResult = await translationService.buildAndLoadTranslations();
           logger.info('SYSTEM', `Auto-built translations: ${buildResult.built} ok, ${buildResult.failed} fail, Redis: ${buildResult.redis}`);

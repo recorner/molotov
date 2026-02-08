@@ -109,6 +109,17 @@ class InstantTranslationService {
     }
   }
 
+  // Remove all cached translations for a specific language from Redis
+  async removeLanguageFromRedis(langCode) {
+    if (!this.isRedisEnabled) return false;
+    try {
+      return await redisTranslationCache.removeLanguage(langCode);
+    } catch (error) {
+      logger.warn('INSTANT_TRANS', `Error removing ${langCode} from Redis: ${error.message}`);
+      return false;
+    }
+  }
+
   // Get cache statistics
   async getCacheStats() {
     if (!this.isRedisEnabled) {

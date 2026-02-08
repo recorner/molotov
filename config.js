@@ -24,16 +24,15 @@ export const BOT_SHORT_DESCRIPTION = process.env.BOT_SHORT_DESCRIPTION || '💎 
 export const BOT_ABOUT_TEXT = process.env.BOT_ABOUT_TEXT || '🛒 Premium Digital Marketplace\n\n💎 Molotov Bot offers exclusive digital products and services for cryptocurrency payments. We specialize in verified accounts, proxy networks, phone numbers, and premium digital tools.\n\n🔐 Secure payments via Bitcoin & Litecoin\n🌍 Worldwide trusted platform\n⚡ Instant delivery\n🛡️ Professional support';
 
 // === Language & Translation Settings ===
-// Comma-separated enabled language codes from env (English is always included)
-export const ENABLED_LANGUAGES = (() => {
-  const env = process.env.ENABLED_LANGUAGES;
+// All language models LibreTranslate should have ready (not necessarily enabled)
+// Enabled languages are managed at runtime via /lingo and persisted in bot state
+export const AVAILABLE_LANGUAGES = (() => {
+  const env = process.env.AVAILABLE_LANGUAGES;
   if (env) {
     const codes = env.split(',').map(c => c.trim().toLowerCase()).filter(Boolean);
-    // Always ensure 'en' is first
     return ['en', ...codes.filter(c => c !== 'en')];
   }
-  // Default fallback set
-  return ['en', 'ru', 'es', 'fr', 'de', 'zh'];
+  return ['en', 'es', 'fr', 'de'];
 })();
 
 export const DEFAULT_LANGUAGE = process.env.DEFAULT_LANGUAGE || 'en';
@@ -47,6 +46,3 @@ export const LIBRETRANSLATE_URL = process.env.LIBRETRANSLATE_URL || 'http://loca
 export const LIBRETRANSLATE_PORT = parseInt(process.env.LIBRETRANSLATE_PORT || '5000', 10);
 export const LIBRETRANSLATE_CONTAINER_NAME = process.env.LIBRETRANSLATE_CONTAINER_NAME || 'molotov-libretranslate';
 export const LIBRETRANSLATE_AUTO_START = process.env.LIBRETRANSLATE_AUTO_START !== 'false'; // default ON
-
-// Preload all UI translations into memory at startup
-export const PRELOAD_TRANSLATIONS = process.env.PRELOAD_TRANSLATIONS !== 'false';

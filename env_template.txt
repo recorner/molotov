@@ -70,7 +70,7 @@ ADMIN_POLL_INTERVAL=60000
 # === LANGUAGE & TRANSLATION SETTINGS ===
 # Comma-separated list of enabled language codes (English is always enabled)
 # Available: ru,zh,es,fr,de,it,pt,pl,tr,ar,ja,ko,hi,nl,sv,no,da,fi,uk,cs,el
-ENABLED_LANGUAGES=ru,es,fr,de,zh
+AVAILABLE_LANGUAGES=es,fr,de,ru,it,pt,zh,ar,ja,ko,tr,pl,nl,hi
 
 # Default language for new users before they choose
 DEFAULT_LANGUAGE=en
@@ -91,9 +91,6 @@ LIBRETRANSLATE_CONTAINER_NAME=molotov-libretranslate
 # When enabled, bot will pull image, start container, and manage its lifecycle
 # Only requirement: Docker must be installed on the system
 LIBRETRANSLATE_AUTO_START=true
-
-# Preload all UI translations at startup for instant responses (true/false)
-PRELOAD_TRANSLATIONS=true
 
 # === INSTRUCTIONS ===
 # 1. Get BlockCypher API key (optional for free tier): https://accounts.blockcypher.com/

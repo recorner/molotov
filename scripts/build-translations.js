@@ -15,7 +15,7 @@ class TranslationBuilder {
   constructor() {
     this.outputDir = path.join(__dirname, '../generated/translations');
     this.translationsData = {};
-    // Use enabled languages from translationService (reads ENABLED_LANGUAGES from .env)
+    // Use enabled languages from translationService (reads from persisted state)
     this.supportedLanguages = translationService.getEnabledCodes().filter(c => c !== 'en');
     // Note: call translationBuilder.init() before building to connect LibreTranslate
     this.stats = {

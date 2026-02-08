@@ -180,6 +180,27 @@ class RedisTranslationCache {
     }
   }
 
+  // Remove all cached translations for a specific language
+  async removeLanguage(langCode) {
+    if (!this.isConnected || !this.redis) return false;
+    try {
+      const pattern = `${this.translationPrefix}${langCode}:*`;
+      const keys = await this.redis.keys(pattern);
+      if (keys.length > 0) {
+        const pipeline = this.redis.pipeline();
+        for (const key of keys) {
+          pipeline.del(key);
+        }
+        await pipeline.exec();
+        logger.info('REDIS', `Removed ${keys.length} cached translations for ${langCode}`);
+      }
+      return true;
+    } catch (error) {
+      logger.warn('REDIS', `Error removing ${langCode} translations: ${error.message}`);
+      return false;
+    }
+  }
+
   // Get cache statistics
   async getStats() {
     if (!this.isConnected || !this.redis) {
