@@ -202,9 +202,10 @@ export async function handlePaymentSelection(bot, query) {
       reply_markup: { inline_keyboard: paymentButtons }
     }, true); // Force banner for payment instructions
 
-    // Show status message
+    // Show translated status message
+    const loadedAlert = await messageTranslator.translateTemplateForUser('payment_loaded_alert', from.id, { currency: currencyName });
     await bot.answerCallbackQuery(query.id, { 
-      text: `💳 Payment instructions loaded for ${currencyName}`,
+      text: `💳 ${loadedAlert}`,
       show_alert: false 
     });
 
@@ -234,8 +235,9 @@ export async function handlePaymentConfirmation(bot, query) {
   if (!spamPrevention.canPerformAction(from.id, 'confirm')) {
     console.log('[CONFIRM TRACK 6] Spam prevention blocked');
     const remaining = spamPrevention.getTimeRemaining(from.id, 'confirm');
+    const waitMsg = await messageTranslator.translateTemplateForUser('wait_seconds', from.id, { seconds: remaining });
     return bot.answerCallbackQuery(query.id, { 
-      text: `⏱️ Please wait ${remaining} seconds before trying again`,
+      text: `⏱️ ${waitMsg}`,
       show_alert: true 
     });
   }
@@ -245,15 +247,27 @@ export async function handlePaymentConfirmation(bot, query) {
   // Check if this is a duplicate confirmation BEFORE recording it
   if (spamPrevention.isDuplicateConfirmation(from.id, orderId)) {
     console.log('[CONFIRM TRACK 8] Duplicate confirmation detected, sending reminder');
-    // Send beautiful reminder instead of new confirmation
+    // Fetch translated reminder strings
+    const [autoDetect, notifyFound, noAction, processingTitle,
+      btnStatus, btnContactSupport, reminderAlert
+    ] = await Promise.all([
+      messageTranslator.translateTemplateForUser('auto_detection_in_progress', from.id),
+      messageTranslator.translateTemplateForUser('get_notified_when_found', from.id),
+      messageTranslator.translateTemplateForUser('no_action_needed_wait', from.id),
+      messageTranslator.translateTemplateForUser('payment_processing_title', from.id),
+      messageTranslator.translateTemplateForUser('btn_check_status', from.id),
+      messageTranslator.translateTemplateForUser('btn_contact_support', from.id),
+      messageTranslator.translateTemplateForUser('confirmation_reminder_alert', from.id),
+    ]);
+    
     const reminderContent = 
       `**Order #${orderId}**\n` +
-      `⏱️ Auto-detection in progress\n` +
-      `📱 You'll get notified when found\n\n` +
-      `💡 **No action needed - just wait**`;
+      `⏱️ ${autoDetect}\n` +
+      `📱 ${notifyFound}\n\n` +
+      `💡 **${noAction}**`;
 
     const reminderMessage = uiOptimizer.formatMessage(
-      '🔔 Payment Processing',
+      `🔔 ${processingTitle}`,
       reminderContent,
       { 
         style: 'compact',
@@ -266,14 +280,14 @@ export async function handlePaymentConfirmation(bot, query) {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
-          [{ text: '🔄 Check Status', callback_data: `status_${orderId}` }],
-          [{ text: '💬 Contact Support', url: 'https://t.me/kopachev4' }]
+          [{ text: `🔄 ${btnStatus}`, callback_data: `status_${orderId}` }],
+          [{ text: `💬 ${btnContactSupport}`, url: 'https://t.me/kopachev4' }]
         ]
       }
     });
 
     return bot.answerCallbackQuery(query.id, { 
-      text: '🔔 Confirmation reminder sent - payment still being processed',
+      text: `🔔 ${reminderAlert}`,
       show_alert: false 
     });
   }
@@ -287,8 +301,9 @@ export async function handlePaymentConfirmation(bot, query) {
   if (lastConfirmation && now - lastConfirmation < PAYMENT_CONFIRMATION_COOLDOWN) {
     const remainingTime = Math.ceil((PAYMENT_CONFIRMATION_COOLDOWN - (now - lastConfirmation)) / 1000);
     console.log('[CONFIRM TRACK 9] Confirmation cooldown active:', remainingTime, 'seconds');
+    const cooldownMsg = await messageTranslator.translateTemplateForUser('confirm_cooldown', from.id, { seconds: remainingTime });
     return bot.answerCallbackQuery(query.id, { 
-      text: `⏱️ You can send another confirmation in ${remainingTime} seconds`,
+      text: `⏱️ ${cooldownMsg}`,
       show_alert: true 
     });
   }
@@ -304,8 +319,9 @@ export async function handlePaymentConfirmation(bot, query) {
   
   if (confirmationCount >= 5) {
     console.log('[CONFIRM TRACK 9] Max confirmations reached:', confirmationCount);
+    const maxMsg = await messageTranslator.translateTemplateForUser('max_confirmations_error', from.id);
     return bot.answerCallbackQuery(query.id, { 
-      text: `🚫 Maximum confirmations reached for this order. Please wait for processing or contact support.`,
+      text: `🚫 ${maxMsg}`,
       show_alert: true 
     });
   }
@@ -323,8 +339,9 @@ export async function handlePaymentConfirmation(bot, query) {
 
     if (err || !order) {
       console.log('[CONFIRM TRACK 14] Order not found or database error');
+      const notFoundMsg = await messageTranslator.translateTemplateForUser('order_not_found_error', from.id);
       return bot.answerCallbackQuery(query.id, { 
-        text: '❌ Order not found or access denied',
+        text: `❌ ${notFoundMsg}`,
         show_alert: true 
       });
     }
@@ -335,11 +352,11 @@ export async function handlePaymentConfirmation(bot, query) {
       console.log('[CONFIRM TRACK 16] Order status is not pending');
       let statusText;
       if (order.status === 'completed') {
-        statusText = '✅ This order is already completed';
+        statusText = '✅ ' + await messageTranslator.translateTemplateForUser('order_already_completed', from.id);
       } else if (order.status === 'cancelled') {
-        statusText = '❌ This order was cancelled';
+        statusText = '❌ ' + await messageTranslator.translateTemplateForUser('order_was_cancelled', from.id);
       } else {
-        statusText = `🔄 Order status: ${order.status}`;
+        statusText = '🔄 ' + await messageTranslator.translateTemplateForUser('order_status_text', from.id, { status: order.status });
       }
       
       return bot.answerCallbackQuery(query.id, { 
@@ -350,20 +367,34 @@ export async function handlePaymentConfirmation(bot, query) {
 
     console.log('[CONFIRM TRACK 17] Order status is pending, processing confirmation');
 
-    // Send beautiful payment confirmation
+    // Fetch translations for confirmation page
+    const [confirmTitle, autoVerify, detectTime, instantDelivery,
+      notifiedAuto, btnStatus, btnSupport, btnContinue, confirmAlert
+    ] = await Promise.all([
+      messageTranslator.translateTemplateForUser('payment_confirmation_title', from.id),
+      messageTranslator.translateTemplateForUser('auto_verification_active', from.id),
+      messageTranslator.translateTemplateForUser('detection_5_15_min', from.id),
+      messageTranslator.translateTemplateForUser('instant_delivery_after_confirm', from.id),
+      messageTranslator.translateTemplateForUser('notified_automatically', from.id),
+      messageTranslator.translateTemplateForUser('btn_check_status', from.id),
+      messageTranslator.translateTemplateForUser('btn_support', from.id),
+      messageTranslator.translateTemplateForUser('btn_continue_shopping', from.id),
+      messageTranslator.translateTemplateForUser('payment_confirm_success', from.id),
+    ]);
+
     const confirmationContent = 
       `**Order #${orderId}**\n` +
       `${order.product_name}\n` +
       `💰 ${uiOptimizer.formatPrice(order.price)} ${order.currency.toUpperCase()}\n\n` +
       
-      `🤖 **Auto-verification active**\n` +
-      `⏱️ Detection in 5-15 minutes\n` +
-      `🚀 Instant delivery after confirmation\n\n` +
+      `🤖 **${autoVerify}**\n` +
+      `⏱️ ${detectTime}\n` +
+      `🚀 ${instantDelivery}\n\n` +
       
-      `📱 **You'll be notified automatically**`;
+      `📱 **${notifiedAuto}**`;
 
     const confirmationMessage = uiOptimizer.formatMessage(
-      '✅ Payment Confirmation Received',
+      `✅ ${confirmTitle}`,
       confirmationContent,
       { 
         style: 'compact',
@@ -377,11 +408,11 @@ export async function handlePaymentConfirmation(bot, query) {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: '🔄 Check Status', callback_data: `status_${orderId}` },
-            { text: '💬 Support', url: 'https://t.me/kopachev4' }
+            { text: `🔄 ${btnStatus}`, callback_data: `status_${orderId}` },
+            { text: `💬 ${btnSupport}`, url: 'https://t.me/kopachev4' }
           ],
           [
-            { text: '🏪 Continue Shopping', callback_data: 'load_categories' }
+            { text: `🏪 ${btnContinue}`, callback_data: 'load_categories' }
           ]
         ]
       }
@@ -424,7 +455,7 @@ export async function handlePaymentConfirmation(bot, query) {
 
     // Provide user feedback via callback query
     bot.answerCallbackQuery(query.id, { 
-      text: '✅ Payment confirmation sent successfully!',
+      text: `✅ ${confirmAlert}`,
       show_alert: false 
     });
   });
@@ -465,13 +496,20 @@ export async function handleAdminPaymentAction(bot, query) {
       // Update order status to awaiting_product for delivery
       db.run(`UPDATE orders SET status = 'awaiting_product' WHERE id = ?`, [orderId]);
       
-      // Notify buyer with beautiful confirmation
+      // Translate buyer notification using BUYER's language
+      const [buyerConfirmed, buyerDelivery, buyerReceive] = await Promise.all([
+        messageTranslator.translateTemplateForUser('buyer_payment_confirmed', targetUserId),
+        messageTranslator.translateTemplateForUser('buyer_delivery_in_progress', targetUserId),
+        messageTranslator.translateTemplateForUser('buyer_receive_shortly', targetUserId),
+      ]);
+      
+      // Notify buyer with translated confirmation
       const confirmationMessage = uiOptimizer.formatMessage(
-        `✅ Payment Confirmed`,
+        `✅ ${buyerConfirmed}`,
         `**Order #${orderId}**\n` +
         `${order.product_name}\n\n` +
-        `🚀 **Product delivery in progress...**\n` +
-        `📱 You'll receive it here shortly`,
+        `🚀 **${buyerDelivery}**\n` +
+        `📱 ${buyerReceive}`,
         { 
           style: 'compact',
           addTimestamp: false 
@@ -516,12 +554,19 @@ export async function handleAdminPaymentAction(bot, query) {
       // Update order status
       db.run(`UPDATE orders SET status = 'cancelled' WHERE id = ?`, [orderId]);
       
-      // Notify buyer with beautiful cancellation message
+      // Translate buyer cancellation using BUYER's language
+      const [buyerCancelled, buyerNotVerified, buyerContactWrong] = await Promise.all([
+        messageTranslator.translateTemplateForUser('buyer_payment_cancelled', targetUserId),
+        messageTranslator.translateTemplateForUser('buyer_payment_not_verified', targetUserId),
+        messageTranslator.translateTemplateForUser('buyer_contact_if_wrong', targetUserId),
+      ]);
+      
+      // Notify buyer with translated cancellation message
       const cancellationMessage = uiOptimizer.formatMessage(
-        `❌ Payment Cancelled`,
+        `❌ ${buyerCancelled}`,
         `**Order #${orderId}**\n\n` +
-        `🔍 **Payment could not be verified**\n` +
-        `💬 Contact support if this seems wrong`,
+        `🔍 **${buyerNotVerified}**\n` +
+        `💬 ${buyerContactWrong}`,
         { 
           style: 'compact',
           addTimestamp: false 
@@ -600,29 +645,37 @@ export async function handleProductDelivery(bot, msg, orderId) {
     console.log('[DEBUG] Sending to buyer ID:', buyerId);
 
     try {
+      // Translate delivery caption using BUYER's language
+      const [deliveryTitle, orderLabel, detailsLabel] = await Promise.all([
+        messageTranslator.translateTemplateForUser('product_delivery_title', buyerId),
+        messageTranslator.translateTemplateForUser('order_id', buyerId),
+        messageTranslator.translateTemplateForUser('description_label', buyerId),
+      ]);
+      const deliveryCaption = `🎉 *${deliveryTitle}*\n\n🧾 ${orderLabel}: *#${orderId}*\n🛍️ Product: *${order.product_name}*${text ? `\n📝 ${detailsLabel}: ${text}` : ''}\n\n━━━━━━━━━━━━━━━━━━━━━`;
+      
       // Send content to buyer
       if (fileId) {
         console.log('[DEBUG] Sending document to buyer');
         await bot.sendDocument(buyerId, fileId, {
-          caption: `🎉 *Your Product Delivery*\n\n🧾 Order: *#${orderId}*\n🛍️ Product: *${order.product_name}*${text ? `\n📝 Details: ${text}` : ''}\n\n━━━━━━━━━━━━━━━━━━━━━`,
+          caption: deliveryCaption,
           parse_mode: 'Markdown'
         });
       } else if (photoId) {
         console.log('[DEBUG] Sending photo to buyer');
         await bot.sendPhoto(buyerId, photoId, {
-          caption: `🎉 *Your Product Delivery*\n\n🧾 Order: *#${orderId}*\n🛍️ Product: *${order.product_name}*${text ? `\n📝 Details: ${text}` : ''}\n\n━━━━━━━━━━━━━━━━━━━━━`,
+          caption: deliveryCaption,
           parse_mode: 'Markdown'
         });
       } else if (videoId) {
         console.log('[DEBUG] Sending video to buyer');
         await bot.sendVideo(buyerId, videoId, {
-          caption: `🎉 *Your Product Delivery*\n\n🧾 Order: *#${orderId}*\n🛍️ Product: *${order.product_name}*${text ? `\n📝 Details: ${text}` : ''}\n\n━━━━━━━━━━━━━━━━━━━━━`,
+          caption: deliveryCaption,
           parse_mode: 'Markdown'
         });
       } else if (text) {
         console.log('[DEBUG] Sending text to buyer');
         await bot.sendMessage(buyerId,
-          `🎉 *Your Product Delivery*\n\n🧾 Order: *#${orderId}*\n🛍️ Product: *${order.product_name}*\n📝 Details:\n${text}\n\n━━━━━━━━━━━━━━━━━━━━━`,
+          `🎉 *${deliveryTitle}*\n\n🧾 ${orderLabel}: *#${orderId}*\n🛍️ Product: *${order.product_name}*\n📝 ${detailsLabel}:\n${text}\n\n━━━━━━━━━━━━━━━━━━━━━`,
           { parse_mode: 'Markdown' }
         );
       }
@@ -681,9 +734,14 @@ export async function handleProductDelivery(bot, msg, orderId) {
         msg.chat.id
       );
 
-      // Send final confirmation to buyer
+      // Send translated final confirmation to buyer
+      const [completeText, thankYou, questionsSupport] = await Promise.all([
+        messageTranslator.translateTemplateForUser('order_complete_text', buyerId),
+        messageTranslator.translateTemplateForUser('thank_you_purchase', buyerId),
+        messageTranslator.translateTemplateForUser('questions_contact_support', buyerId),
+      ]);
       await bot.sendMessage(buyerId,
-        `✅ *Order Completed*\n\nThank you for your purchase!\n\n🧾 Order ID: *#${orderId}*\n🛍️ Product: *${order.product_name}*\n\n━━━━━━━━━━━━━━━━━━━━━\n\nIf you have any questions, please contact support.`,
+        `✅ *${completeText}*\n\n${thankYou}\n\n🧾 ${orderLabel}: *#${orderId}*\n🛍️ Product: *${order.product_name}*\n\n━━━━━━━━━━━━━━━━━━━━━\n\n${questionsSupport}`,
         { parse_mode: 'Markdown' }
       );
 
@@ -719,39 +777,69 @@ export async function handleProductDelivery(bot, msg, orderId) {
 
 // Enhanced payment flow handlers
 export async function handlePaymentGuide(bot, query) {
-  const { data } = query;
+  const { data, from } = query;
   
   if (!data.startsWith('guide_')) return;
   
   const productId = parseInt(data.split('_')[1]);
   
-  const text = `💡 **Cryptocurrency Payment Guide**\n\n` +
-    `🔐 **Security Features:**\n` +
-    `• All payments are secure and encrypted\n` +
-    `• Transactions are irreversible\n` +
-    `• No personal data required\n\n` +
-    `💳 **Payment Process:**\n` +
-    `1️⃣ Select your cryptocurrency (BTC/LTC)\n` +
-    `2️⃣ Copy the provided payment address\n` +
-    `3️⃣ Send exact amount from your wallet\n` +
-    `4️⃣ Confirm payment in chat\n` +
-    `5️⃣ Wait for admin verification\n` +
-    `6️⃣ Receive your product instantly\n\n` +
-    `⚠️ **Important Notes:**\n` +
-    `• Send exact amount only\n` +
-    `• Double-check the address\n` +
-    `• Keep transaction ID safe\n` +
-    `• Contact support if issues occur\n\n` +
-    `🕒 **Processing Time:** Usually 5-30 minutes`;
+  // Fetch all guide translations in parallel
+  const [guideTitle, secTitle, secEncrypted, secIrreversible, secNoPersonal,
+    procTitle, gStep1, gStep2, gStep3, gStep4, gStep5, gStep6,
+    impTitle, noteExact, noteDouble, noteTx, noteContact, procTime,
+    btnBtc, btnLtc, btnContactSupport, btnBackOrder
+  ] = await Promise.all([
+    messageTranslator.translateTemplateForUser('guide_title', from.id),
+    messageTranslator.translateTemplateForUser('guide_security_title', from.id),
+    messageTranslator.translateTemplateForUser('guide_secure_encrypted', from.id),
+    messageTranslator.translateTemplateForUser('guide_irreversible', from.id),
+    messageTranslator.translateTemplateForUser('guide_no_personal_data', from.id),
+    messageTranslator.translateTemplateForUser('guide_process_title', from.id),
+    messageTranslator.translateTemplateForUser('guide_step_select_crypto', from.id),
+    messageTranslator.translateTemplateForUser('guide_step_copy_address', from.id),
+    messageTranslator.translateTemplateForUser('guide_step_send_amount', from.id),
+    messageTranslator.translateTemplateForUser('guide_step_confirm_chat', from.id),
+    messageTranslator.translateTemplateForUser('guide_step_wait_verify', from.id),
+    messageTranslator.translateTemplateForUser('guide_step_receive_product', from.id),
+    messageTranslator.translateTemplateForUser('guide_important_title', from.id),
+    messageTranslator.translateTemplateForUser('guide_exact_amount', from.id),
+    messageTranslator.translateTemplateForUser('guide_double_check', from.id),
+    messageTranslator.translateTemplateForUser('guide_keep_tx_id', from.id),
+    messageTranslator.translateTemplateForUser('guide_contact_issues', from.id),
+    messageTranslator.translateTemplateForUser('guide_processing_time', from.id),
+    messageTranslator.translateTemplateForUser('btn_continue_btc', from.id),
+    messageTranslator.translateTemplateForUser('btn_continue_ltc', from.id),
+    messageTranslator.translateTemplateForUser('btn_contact_support', from.id),
+    messageTranslator.translateTemplateForUser('btn_back_to_order', from.id),
+  ]);
+  
+  const text = `💡 **${guideTitle}**\n\n` +
+    `🔐 **${secTitle}**\n` +
+    `• ${secEncrypted}\n` +
+    `• ${secIrreversible}\n` +
+    `• ${secNoPersonal}\n\n` +
+    `💳 **${procTitle}**\n` +
+    `1️⃣ ${gStep1}\n` +
+    `2️⃣ ${gStep2}\n` +
+    `3️⃣ ${gStep3}\n` +
+    `4️⃣ ${gStep4}\n` +
+    `5️⃣ ${gStep5}\n` +
+    `6️⃣ ${gStep6}\n\n` +
+    `⚠️ **${impTitle}**\n` +
+    `• ${noteExact}\n` +
+    `• ${noteDouble}\n` +
+    `• ${noteTx}\n` +
+    `• ${noteContact}\n\n` +
+    `🕒 **${procTime}**`;
 
   const keyboard = [
     [
-      { text: '₿ Continue with Bitcoin', callback_data: `pay_btc_${productId}` },
-      { text: '🪙 Continue with Litecoin', callback_data: `pay_ltc_${productId}` }
+      { text: `₿ ${btnBtc}`, callback_data: `pay_btc_${productId}` },
+      { text: `🪙 ${btnLtc}`, callback_data: `pay_ltc_${productId}` }
     ],
     [
-      { text: '📞 Contact Support', url: 'https://t.me/kopachev4' },
-      { text: '🔙 Back to Order', callback_data: `buy_${productId}` }
+      { text: `📞 ${btnContactSupport}`, url: 'https://t.me/kopachev4' },
+      { text: `🔙 ${btnBackOrder}`, callback_data: `buy_${productId}` }
     ]
   ];
 
@@ -763,36 +851,66 @@ export async function handlePaymentGuide(bot, query) {
 }
 
 export async function handlePaymentHelp(bot, query) {
-  const { data } = query;
+  const { data, from } = query;
   if (!data.startsWith('help_payment_')) return;
 
   const currency = data.split('_')[2];
   const currencyName = currency === 'btc' ? 'Bitcoin' : 'Litecoin';
   const currencyEmoji = currency === 'btc' ? '₿' : '🪙';
+  const confirmTimeText = currency === 'btc' ? '10-60 min' : '2-15 min';
 
-  const helpMessage = `🆘 **${currencyName} Payment Help**\n\n` +
-    `${currencyEmoji} **Getting ${currencyName}:**\n` +
-    `• Buy from exchanges like Coinbase, Binance\n` +
-    `• Use P2P platforms like LocalBitcoins\n` +
-    `• Bitcoin ATMs (for Bitcoin)\n\n` +
-    `📱 **Recommended Wallets:**\n` +
-    `• Mobile: Trust Wallet, Exodus\n` +
-    `• Desktop: Electrum, Atomic Wallet\n` +
-    `• Hardware: Ledger, Trezor\n\n` +
-    `🔍 **Checking Your Transaction:**\n` +
-    `• Bitcoin: blockchain.info\n` +
-    `• Litecoin: blockchair.com\n\n` +
-    `⏱️ **Typical Confirmation Times:**\n` +
-    `• ${currencyName}: ${currency === 'btc' ? '10-60 minutes' : '2-15 minutes'}\n\n` +
-    `❓ **Common Issues:**\n` +
-    `• Wrong address → Lost funds\n` +
-    `• Low fees → Slow confirmation\n` +
-    `• Exchange withdrawal → Use personal wallet\n\n` +
-    `📞 **Need More Help?**\n` +
-    `Contact our support team for assistance.`;
+  // Fetch all help translations in parallel
+  const [helpTitle, getCrypto, buyExchanges, useP2P, btcAtms,
+    walletsTitle, mobileW, desktopW, hardwareW,
+    checkTx, btcExplorer, ltcExplorer, confirmTimes,
+    issuesTitle, wrongAddr, lowFees, exchangeW,
+    needMore, contactTeam, btnBackPayment
+  ] = await Promise.all([
+    messageTranslator.translateTemplateForUser('help_title', from.id, { currency: currencyName }),
+    messageTranslator.translateTemplateForUser('help_getting_crypto', from.id, { currency: currencyName }),
+    messageTranslator.translateTemplateForUser('help_buy_exchanges', from.id),
+    messageTranslator.translateTemplateForUser('help_p2p', from.id),
+    messageTranslator.translateTemplateForUser('help_btc_atms', from.id),
+    messageTranslator.translateTemplateForUser('help_wallets_title', from.id),
+    messageTranslator.translateTemplateForUser('help_mobile_wallets', from.id),
+    messageTranslator.translateTemplateForUser('help_desktop_wallets', from.id),
+    messageTranslator.translateTemplateForUser('help_hardware_wallets', from.id),
+    messageTranslator.translateTemplateForUser('help_check_tx_title', from.id),
+    messageTranslator.translateTemplateForUser('help_btc_explorer', from.id),
+    messageTranslator.translateTemplateForUser('help_ltc_explorer', from.id),
+    messageTranslator.translateTemplateForUser('help_confirm_times', from.id),
+    messageTranslator.translateTemplateForUser('help_issues_title', from.id),
+    messageTranslator.translateTemplateForUser('help_wrong_address', from.id),
+    messageTranslator.translateTemplateForUser('help_low_fees', from.id),
+    messageTranslator.translateTemplateForUser('help_exchange_withdrawal', from.id),
+    messageTranslator.translateTemplateForUser('help_need_more', from.id),
+    messageTranslator.translateTemplateForUser('help_contact_team', from.id),
+    messageTranslator.translateTemplateForUser('btn_back_to_payment', from.id),
+  ]);
+
+  const helpMessage = `🆘 **${helpTitle}**\n\n` +
+    `${currencyEmoji} **${getCrypto}**\n` +
+    `• ${buyExchanges}\n` +
+    `• ${useP2P}\n` +
+    `• ${btcAtms}\n\n` +
+    `📱 **${walletsTitle}**\n` +
+    `• ${mobileW}\n` +
+    `• ${desktopW}\n` +
+    `• ${hardwareW}\n\n` +
+    `🔍 **${checkTx}**\n` +
+    `• ${btcExplorer}\n` +
+    `• ${ltcExplorer}\n\n` +
+    `⏱️ **${confirmTimes}**\n` +
+    `• ${currencyName}: ${confirmTimeText}\n\n` +
+    `❓ **${issuesTitle}**\n` +
+    `• ${wrongAddr}\n` +
+    `• ${lowFees}\n` +
+    `• ${exchangeW}\n\n` +
+    `📞 **${needMore}**\n` +
+    `${contactTeam}`;
 
   const buttons = [
-    [{ text: '🔙 Back to Payment', callback_data: query.message.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data || 'load_categories' }]
+    [{ text: `🔙 ${btnBackPayment}`, callback_data: query.message.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data || 'load_categories' }]
   ];
 
   bot.editMessageText(helpMessage, {
@@ -812,8 +930,9 @@ export async function handleOrderStatus(bot, query) {
   // Check spam prevention
   if (!spamPrevention.canPerformAction(from.id, 'status')) {
     const remaining = spamPrevention.getTimeRemaining(from.id, 'status');
+    const waitMsg = await messageTranslator.translateTemplateForUser('wait_seconds', from.id, { seconds: remaining });
     return bot.answerCallbackQuery(query.id, { 
-      text: `⏱️ Please wait ${remaining} seconds before checking again`,
+      text: `⏱️ ${waitMsg}`,
       show_alert: false 
     });
   }
@@ -822,8 +941,9 @@ export async function handleOrderStatus(bot, query) {
           JOIN products p ON p.id = o.product_id 
           WHERE o.id = ? AND o.user_id = ?`, [orderId, from.id], async (err, order) => {
     if (err || !order) {
+      const notFoundMsg = await messageTranslator.translateTemplateForUser('order_not_found_error', from.id);
       return bot.answerCallbackQuery(query.id, { 
-        text: '❌ Order not found or access denied',
+        text: `❌ ${notFoundMsg}`,
         show_alert: true 
       });
     }
@@ -836,34 +956,55 @@ export async function handleOrderStatus(bot, query) {
       'processing': '🔄'
     };
 
-    // Create enhanced status content
+    // Fetch translated status labels
+    const [statusTitle, detailsSection, orderIdLabel, productLabel,
+      amountLabel, currencyLabel, createdLabel, currentStatusLabel,
+      lastUpdatedLabel, btnRefresh, btnSupport, btnContinue
+    ] = await Promise.all([
+      messageTranslator.translateTemplateForUser('order_status_title', from.id),
+      messageTranslator.translateTemplateForUser('order_details_section', from.id),
+      messageTranslator.translateTemplateForUser('order_id', from.id),
+      messageTranslator.translateTemplateForUser('product_label', from.id),
+      messageTranslator.translateTemplateForUser('amount_label', from.id),
+      messageTranslator.translateTemplateForUser('currency_label', from.id),
+      messageTranslator.translateTemplateForUser('created_label', from.id),
+      messageTranslator.translateTemplateForUser('current_status_section', from.id),
+      messageTranslator.translateTemplateForUser('last_updated_label', from.id),
+      messageTranslator.translateTemplateForUser('btn_refresh', from.id),
+      messageTranslator.translateTemplateForUser('btn_support', from.id),
+      messageTranslator.translateTemplateForUser('btn_continue_shopping', from.id),
+    ]);
+
+    const statusDesc = await getStatusDescription(order.status, from.id);
+
+    // Create translated status content
     const statusContent = 
-      `🧾 **Order Details**\n` +
-      `• **Order ID:** #${order.id}\n` +
-      `• **Product:** ${order.product_name}\n` +
-      `• **Amount:** ${uiOptimizer.formatPrice(order.price)}\n` +
-      `• **Currency:** ${order.currency.toUpperCase()}\n` +
-      `• **Created:** ${new Date(order.created_at).toLocaleString()}\n\n` +
+      `🧾 **${detailsSection}**\n` +
+      `• **${orderIdLabel}:** #${order.id}\n` +
+      `• **${productLabel}:** ${order.product_name}\n` +
+      `• **${amountLabel}:** ${uiOptimizer.formatPrice(order.price)}\n` +
+      `• **${currencyLabel}:** ${order.currency.toUpperCase()}\n` +
+      `• **${createdLabel}:** ${new Date(order.created_at).toLocaleString()}\n\n` +
       
-      `📊 **Current Status**\n` +
+      `📊 **${currentStatusLabel}**\n` +
       `${statusEmoji[order.status] || '❓'} **${order.status.toUpperCase()}**\n\n` +
       
-      `${getStatusDescription(order.status)}\n\n` +
+      `${statusDesc}\n\n` +
       
-      `⏰ **Last Updated:** ${new Date().toLocaleString()}`;
+      `⏰ **${lastUpdatedLabel}:** ${new Date().toLocaleString()}`;
 
     const statusMessage = uiOptimizer.formatMessage(
-      '📋 Order Status',
+      `📋 ${statusTitle}`,
       statusContent,
       { addSeparator: true, addTimestamp: false }
     );
 
     const buttons = [
       [
-        { text: '🔄 Refresh', callback_data: `status_${orderId}` },
-        { text: '� Support', url: 'https://t.me/kopachev4' }
+        { text: `🔄 ${btnRefresh}`, callback_data: `status_${orderId}` },
+        { text: `💬 ${btnSupport}`, url: 'https://t.me/kopachev4' }
       ],
-      [{ text: '🏪 Continue Shopping', callback_data: 'load_categories' }]
+      [{ text: `🏪 ${btnContinue}`, callback_data: 'load_categories' }]
     ];
 
     // Use smart message manager to handle both text and photo messages
@@ -920,8 +1061,9 @@ export async function handleCancelOrder(bot, query) {
   // Check spam prevention
   if (!spamPrevention.canPerformAction(from.id, 'cancel')) {
     const remaining = spamPrevention.getTimeRemaining(from.id, 'cancel');
+    const waitMsg = await messageTranslator.translateTemplateForUser('wait_seconds', from.id, { seconds: remaining });
     return bot.answerCallbackQuery(query.id, { 
-      text: `⏱️ Please wait ${remaining} seconds before trying again`,
+      text: `⏱️ ${waitMsg}`,
       show_alert: true 
     });
   }
@@ -930,8 +1072,9 @@ export async function handleCancelOrder(bot, query) {
           JOIN products p ON p.id = o.product_id 
           WHERE o.id = ? AND o.user_id = ?`, [orderId, from.id], async (err, order) => {
     if (err || !order) {
+      const notFoundMsg = await messageTranslator.translateTemplateForUser('order_not_found_error', from.id);
       return bot.answerCallbackQuery(query.id, { 
-        text: '❌ Order not found or access denied',
+        text: `❌ ${notFoundMsg}`,
         show_alert: true 
       });
     }
@@ -939,11 +1082,11 @@ export async function handleCancelOrder(bot, query) {
     if (order.status !== 'pending') {
       let statusMessage;
       if (order.status === 'completed') {
-        statusMessage = '❌ Cannot cancel completed orders. Contact support if needed.';
+        statusMessage = '❌ ' + await messageTranslator.translateTemplateForUser('cancel_already_completed', from.id);
       } else if (order.status === 'cancelled') {
-        statusMessage = 'ℹ️ This order is already cancelled.';
+        statusMessage = 'ℹ️ ' + await messageTranslator.translateTemplateForUser('cancel_already_cancelled', from.id);
       } else {
-        statusMessage = `❌ Cannot cancel order with status: ${order.status}`;
+        statusMessage = '❌ ' + await messageTranslator.translateTemplateForUser('cancel_wrong_status', from.id, { status: order.status });
       }
       
       return bot.answerCallbackQuery(query.id, { 
@@ -962,35 +1105,61 @@ export async function handleCancelOrder(bot, query) {
         });
       }
 
-      // Create cancellation confirmation message
+      // Fetch cancellation translations
+      const [cancelTitle, cancelSuccess, detailsSection, orderIdLabel, productLabel,
+        amountLabel, cancelledLabel, whatMeans, cancelInfo1, cancelInfo2, cancelInfo3,
+        ifPaid, contactImm, provideTx, refundQuick, continueText,
+        btnBrowse, btnContactSupport, cancelAlert
+      ] = await Promise.all([
+        messageTranslator.translateTemplateForUser('order_cancelled_title', from.id),
+        messageTranslator.translateTemplateForUser('order_cancelled_success', from.id),
+        messageTranslator.translateTemplateForUser('order_details_section', from.id),
+        messageTranslator.translateTemplateForUser('order_id', from.id),
+        messageTranslator.translateTemplateForUser('product_label', from.id),
+        messageTranslator.translateTemplateForUser('amount_label', from.id),
+        messageTranslator.translateTemplateForUser('cancelled_at', from.id),
+        messageTranslator.translateTemplateForUser('cancel_what_this_means', from.id),
+        messageTranslator.translateTemplateForUser('cancel_info_success', from.id),
+        messageTranslator.translateTemplateForUser('cancel_info_no_payment', from.id),
+        messageTranslator.translateTemplateForUser('cancel_info_new_order', from.id),
+        messageTranslator.translateTemplateForUser('cancel_if_already_paid', from.id),
+        messageTranslator.translateTemplateForUser('cancel_contact_immediately', from.id),
+        messageTranslator.translateTemplateForUser('cancel_provide_tx_id', from.id),
+        messageTranslator.translateTemplateForUser('cancel_refund_quickly', from.id),
+        messageTranslator.translateTemplateForUser('cancel_continue_text', from.id),
+        messageTranslator.translateTemplateForUser('btn_browse_store', from.id),
+        messageTranslator.translateTemplateForUser('btn_contact_support', from.id),
+        messageTranslator.translateTemplateForUser('cancel_success_alert', from.id),
+      ]);
+
+      // Create translated cancellation confirmation message
       const cancellationContent = 
-        `❌ **Order Successfully Cancelled**\n\n` +
-        `🧾 **Order Details**\n` +
-        `• **Order ID:** #${orderId}\n` +
-        `• **Product:** ${order.product_name}\n` +
-        `• **Amount:** ${uiOptimizer.formatPrice(order.price)}\n` +
-        `• **Cancelled:** ${new Date().toLocaleString()}\n\n` +
+        `❌ **${cancelSuccess}**\n\n` +
+        `🧾 **${detailsSection}**\n` +
+        `• **${orderIdLabel}:** #${orderId}\n` +
+        `• **${productLabel}:** ${order.product_name}\n` +
+        `• **${amountLabel}:** ${uiOptimizer.formatPrice(order.price)}\n` +
+        `• **${cancelledLabel}:** ${new Date().toLocaleString()}\n\n` +
         
-        `✅ **What this means:**\n` +
-        `• Order has been cancelled successfully\n` +
-        `• No payment is required for this order\n` +
-        `• You can place a new order anytime\n\n` +
+        `✅ **${whatMeans}**\n` +
+        `• ${cancelInfo1}\n` +
+        `• ${cancelInfo2}\n` +
+        `• ${cancelInfo3}\n\n` +
         
-        `💰 **Important:** If you already sent payment:\n` +
-        `• Contact our support team immediately\n` +
-        `• Provide your transaction ID\n` +
-        `• We'll process your refund quickly\n\n` +
+        `💰 **${ifPaid}**\n` +
+        `• ${contactImm}\n` +
+        `• ${provideTx}\n` +
+        `• ${refundQuick}\n\n` +
         
-        `🛍️ **Continue Shopping**\n` +
-        `Browse our store for other products that might interest you.`;
+        `🛍️ **${continueText}**`;
 
       const cancellationMessage = uiOptimizer.formatMessage(
-        '❌ Order Cancelled',
+        `❌ ${cancelTitle}`,
         cancellationContent,
         { addSeparator: true, addTimestamp: false }
       );
 
-      // Send cancellation message and redirect to main categories
+      // Send translated cancellation message
       await smartMessageManager.sendOrEditSmart(
         bot, 
         query.message.chat.id, 
@@ -1001,8 +1170,8 @@ export async function handleCancelOrder(bot, query) {
           reply_markup: {
             inline_keyboard: [
               [
-                { text: '🛍️ Browse Store', callback_data: 'load_categories' },
-                { text: '💬 Contact Support', url: 'https://t.me/kopachev4' }
+                { text: `🛍️ ${btnBrowse}`, callback_data: 'load_categories' },
+                { text: `💬 ${btnContactSupport}`, url: 'https://t.me/kopachev4' }
               ]
             ]
           }
@@ -1029,7 +1198,7 @@ export async function handleCancelOrder(bot, query) {
 
       // Provide feedback via callback query
       bot.answerCallbackQuery(query.id, { 
-        text: '✅ Order cancelled successfully',
+        text: `✅ ${cancelAlert}`,
         show_alert: false 
       });
 
@@ -1053,33 +1222,53 @@ export async function handleCopyAddress(bot, query) {
   // Check spam prevention
   if (!spamPrevention.canPerformAction(from.id, 'copy')) {
     const remaining = spamPrevention.getTimeRemaining(from.id, 'copy');
+    const waitMsg = await messageTranslator.translateTemplateForUser('wait_seconds_short', from.id, { seconds: remaining });
     return bot.answerCallbackQuery(query.id, { 
-      text: `⏱️ Please wait ${remaining} seconds`,
+      text: `⏱️ ${waitMsg}`,
       show_alert: false 
     });
   }
   
   const address = data.replace('copy_address_', '');
   
-  // Enhanced copy address message with mobile-friendly instructions
+  // Fetch copy address translations
+  const [copyTitle, mobileInstr, howToCopy, stepTap, stepSelect, stepPaste,
+    securityCheck, verifyAddr, wrongAddrWarn, copyAlert,
+    btnCopied, btnBackPayment
+  ] = await Promise.all([
+    messageTranslator.translateTemplateForUser('copy_address_title', from.id),
+    messageTranslator.translateTemplateForUser('copy_mobile_instructions', from.id),
+    messageTranslator.translateTemplateForUser('copy_how_to', from.id),
+    messageTranslator.translateTemplateForUser('copy_step_tap_hold', from.id),
+    messageTranslator.translateTemplateForUser('copy_step_select_copy', from.id),
+    messageTranslator.translateTemplateForUser('copy_step_paste_wallet', from.id),
+    messageTranslator.translateTemplateForUser('copy_security_check', from.id),
+    messageTranslator.translateTemplateForUser('copy_verify_address', from.id),
+    messageTranslator.translateTemplateForUser('copy_wrong_address_warning', from.id),
+    messageTranslator.translateTemplateForUser('copy_address_alert', from.id),
+    messageTranslator.translateTemplateForUser('btn_address_copied', from.id),
+    messageTranslator.translateTemplateForUser('btn_back_to_payment', from.id),
+  ]);
+
+  // Translated copy address content
   const copyContent = 
-    `**📱 Mobile Copy Instructions**\n\n` +
+    `**📱 ${mobileInstr}**\n\n` +
     
-    `**👆 How to copy address:**\n` +
-    `1️⃣ Tap and hold address below\n` +
-    `2️⃣ Select "Copy" from menu\n` +
-    `3️⃣ Paste in your wallet app\n\n` +
+    `**👆 ${howToCopy}**\n` +
+    `1️⃣ ${stepTap}\n` +
+    `2️⃣ ${stepSelect}\n` +
+    `3️⃣ ${stepPaste}\n\n` +
     
     `**📋 Payment Address:**\n` +
     `\`${address}\`\n\n` +
     
-    `**⚠️ Security Check:**\n` +
-    `🔍 Verify address after copying\n` +
-    `⚡ Wrong address = lost funds!`;
+    `**⚠️ ${securityCheck}**\n` +
+    `🔍 ${verifyAddr}\n` +
+    `⚡ ${wrongAddrWarn}`;
 
   const copyMessage = uiOptimizer.formatMessage(
-    '📋 Copy Payment Address',
-    '📋 Copy Payment Address',
+    `📋 ${copyTitle}`,
+    `📋 ${copyTitle}`,
     copyContent,
     { addSeparator: false }
   );
@@ -1089,45 +1278,30 @@ export async function handleCopyAddress(bot, query) {
     parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
-        [{ text: '✅ Address Copied', callback_data: 'ignore' }],
-        [{ text: '🔙 Back to Payment', callback_data: 'ignore' }]
+        [{ text: `✅ ${btnCopied}`, callback_data: 'ignore' }],
+        [{ text: `🔙 ${btnBackPayment}`, callback_data: 'ignore' }]
       ]
     }
   });
 
-  // Enhanced status feedback
+  // Translated status feedback
   bot.answerCallbackQuery(query.id, { 
-    text: '📋 Address sent below - tap and hold to copy',
+    text: `📋 ${copyAlert}`,
     show_alert: false 
   });
-  
-  bot.answerCallbackQuery(query.id, { text: '📋 Address sent for easy copying!' });
 }
 
-function getStatusDescription(status) {
-  switch (status) {
-    case 'pending':
-      return `⏳ **Waiting for payment confirmation**\n` +
-             `• Send payment to the provided address\n` +
-             `• Click "I've Sent Payment" after sending\n` +
-             `• Our team will verify within 1 hour`;
-    case 'confirmed':
-      return `✅ **Payment confirmed - Processing delivery**\n` +
-             `• Your payment has been verified\n` +
-             `• Product delivery in progress\n` +
-             `• You'll receive your product shortly`;
-    case 'delivered':
-      return `🎉 **Order completed successfully!**\n` +
-             `• Your product has been delivered\n` +
-             `• Check your messages for the product\n` +
-             `• Thank you for your purchase!`;
-    case 'cancelled':
-      return `❌ **Order has been cancelled**\n` +
-             `• If you sent payment, contact support\n` +
-             `• Refunds processed within 24 hours`;
-    default:
-      return `❓ **Unknown status - Contact support**`;
-  }
+async function getStatusDescription(status, userId) {
+  const statusMap = {
+    'pending': 'status_desc_pending',
+    'confirmed': 'status_desc_confirmed',
+    'awaiting_product': 'status_desc_awaiting',
+    'delivered': 'status_desc_delivered',
+    'cancelled': 'status_desc_cancelled',
+    'processing': 'status_desc_confirmed',
+  };
+  const key = statusMap[status] || 'status_desc_unknown';
+  return await messageTranslator.translateTemplateForUser(key, userId);
 }
 
 /**
@@ -1178,74 +1352,51 @@ export async function handleDeliveryReply(bot, msg) {
       return true;
     }
 
-    // Prepare the message to send to buyer
+    // Prepare the translated message to send to buyer
     const adminMessage = msg.text || msg.caption || null;
-    let buyerMessage = `📬 **Message from Support**\n\n`;
-    buyerMessage += `🧾 **Regarding Order #${orderId}:** ${order.product_name}\n\n`;
-    buyerMessage += `💬 **Message:**\n${adminMessage}\n\n`;
+    const [msgFromSupport, regardingOrder, supportMsgLabel, needHelpReply, btnReplyAdmin, btnContactSupport] = await Promise.all([
+      messageTranslator.translateTemplateForUser('message_from_support', buyerId),
+      messageTranslator.translateTemplateForUser('regarding_order_label', buyerId),
+      messageTranslator.translateTemplateForUser('support_message_label', buyerId),
+      messageTranslator.translateTemplateForUser('need_help_reply', buyerId),
+      messageTranslator.translateTemplateForUser('btn_reply_to_admin', buyerId),
+      messageTranslator.translateTemplateForUser('btn_contact_support', buyerId),
+    ]);
+    let buyerMessage = `📬 **${msgFromSupport}**\n\n`;
+    buyerMessage += `🧾 **${regardingOrder} #${orderId}:** ${order.product_name}\n\n`;
+    buyerMessage += `💬 **${supportMsgLabel}:**\n${adminMessage}\n\n`;
     buyerMessage += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    buyerMessage += `📞 **Need more help?** Reply to this message or contact support.`;
+    buyerMessage += `📞 **${needHelpReply}**`;
 
-    // Send message to buyer
-    if (msg.document) {
-      // Forward document with caption and interactive buttons
-      const replyKeyboard = {
-        inline_keyboard: [
-          [
-            { text: '💬 Reply to Admin', callback_data: `reply_to_admin_${orderId}` },
-            { text: '🆘 Contact Support', url: `https://t.me/${SUPPORT_USERNAME}` }
-          ]
+    // Send message to buyer with translated buttons
+    const replyKeyboard = {
+      inline_keyboard: [
+        [
+          { text: `💬 ${btnReplyAdmin}`, callback_data: `reply_to_admin_${orderId}` },
+          { text: `🆘 ${btnContactSupport}`, url: `https://t.me/${SUPPORT_USERNAME}` }
         ]
-      };
+      ]
+    };
 
+    if (msg.document) {
       await bot.sendDocument(buyerId, msg.document.file_id, {
         caption: buyerMessage,
         parse_mode: 'Markdown',
         reply_markup: replyKeyboard
       });
     } else if (msg.photo) {
-      // Forward photo with caption and interactive buttons
-      const replyKeyboard = {
-        inline_keyboard: [
-          [
-            { text: '💬 Reply to Admin', callback_data: `reply_to_admin_${orderId}` },
-            { text: '🆘 Contact Support', url: `https://t.me/${SUPPORT_USERNAME}` }
-          ]
-        ]
-      };
-
       await bot.sendPhoto(buyerId, msg.photo[msg.photo.length - 1].file_id, {
         caption: buyerMessage,
         parse_mode: 'Markdown',
         reply_markup: replyKeyboard
       });
     } else if (msg.video) {
-      // Forward video with caption and interactive buttons
-      const replyKeyboard = {
-        inline_keyboard: [
-          [
-            { text: '💬 Reply to Admin', callback_data: `reply_to_admin_${orderId}` },
-            { text: '🆘 Contact Support', url: `https://t.me/${SUPPORT_USERNAME}` }
-          ]
-        ]
-      };
-
       await bot.sendVideo(buyerId, msg.video.file_id, {
         caption: buyerMessage,
         parse_mode: 'Markdown',
         reply_markup: replyKeyboard
       });
     } else if (adminMessage) {
-      // Send text message with interactive buttons for buyer
-      const replyKeyboard = {
-        inline_keyboard: [
-          [
-            { text: '💬 Reply to Admin', callback_data: `reply_to_admin_${orderId}` },
-            { text: '🆘 Contact Support', url: `https://t.me/${SUPPORT_USERNAME}` }
-          ]
-        ]
-      };
-
       await bot.sendMessage(buyerId, buyerMessage, {
         parse_mode: 'Markdown',
         reply_markup: replyKeyboard
@@ -1325,18 +1476,27 @@ export async function handleReplyToAdmin(bot, query) {
       timestamp: Date.now()
     });
 
+    const [replyActivated, replyTitle, replyOrderLabel, replySendNow, replyExpire, replyCancelCmd] = await Promise.all([
+      messageTranslator.translateTemplateForUser('reply_mode_success', from.id),
+      messageTranslator.translateTemplateForUser('reply_mode_title', from.id),
+      messageTranslator.translateTemplateForUser('regarding_order_label', from.id),
+      messageTranslator.translateTemplateForUser('reply_mode_instruction', from.id),
+      messageTranslator.translateTemplateForUser('reply_mode_expires', from.id),
+      messageTranslator.translateTemplateForUser('reply_mode_cancel_hint', from.id),
+    ]);
+
     await bot.answerCallbackQuery(query.id, {
-      text: '✅ Reply mode activated. Send your message now.',
+      text: `✅ ${replyActivated}`,
       show_alert: false
     });
 
-    // Send instruction message
+    // Send translated instruction message
     await bot.sendMessage(from.id, 
-      `📝 **Reply Mode Activated**\n\n` +
-      `🧾 Order: #${orderId}\n` +
-      `📱 Send your message now and it will be forwarded to the admin.\n\n` +
-      `⏰ This mode will expire in 5 minutes.\n` +
-      `❌ Type /cancel to exit reply mode.`,
+      `📝 **${replyTitle}**\n\n` +
+      `🧾 ${replyOrderLabel}: #${orderId}\n` +
+      `📱 ${replySendNow}\n\n` +
+      `⏰ ${replyExpire}\n` +
+      `❌ ${replyCancelCmd}`,
       { parse_mode: 'Markdown' }
     );
 

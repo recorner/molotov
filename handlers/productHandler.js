@@ -90,10 +90,11 @@ export async function showProductsInCategory(bot, chatId, categoryId, page = 1, 
           { addSeparator: true }
         );
 
-        // Create additional navigation buttons
+        // Create translated navigation button
+        const backToCategoriesText = await messageTranslator.translateTemplateForUser('btn_back_to_categories', chatId);
         const additionalButtons = [
           {
-            text: '🔙 Back to Categories',
+            text: `🔙 ${backToCategoriesText}`,
             callback_data: 'load_categories'
           }
         ];
