@@ -37,6 +37,7 @@ import { USERNAME_SYNC_ENABLED, USERNAME_SYNC_CRON, USERNAME_SYNC_TIMEZONE } fro
 import { handleWalletInput, handleWalletFinalSave } from './handlers/walletHandler.js';
 import { handleAdminPaymentAction, handleProductDelivery, handleDeliveryReply, handleReplyToAdmin } from './handlers/paymentHandler.js';
 import { handlePokeCommand, handlePokeInput } from './handlers/pokeHandler.js';
+import { handleOtpBotCommand, handleKeyGenCommand, handleOtpCallback, handleOtpInput } from './handlers/otpBotHandler.js';
 
 // Translation Services
 import translationService from './utils/translationService.js';
@@ -469,6 +470,12 @@ bot.onText(/\/sidekick/, async (msg) => {
   }
 });
 
+// OTP Bot command
+bot.onText(/\/otpbot/, (msg) => handleOtpBotCommand(bot, msg));
+
+// Admin key generation command
+bot.onText(/\/key-gen(.*)/, (msg) => handleKeyGenCommand(bot, msg));
+
 // This handler is moved to the main message handler below
 setupDailyWalletPrompt(bot);
 
@@ -657,6 +664,11 @@ bot.on('callback_query', async (query) => {
       return handleWalletCallback(bot, query);
     }
 
+    // OTP Bot callbacks
+    if (data.startsWith('otp_')) {
+      return handleOtpCallback(bot, query);
+    }
+
     // Sidekick system callbacks
     if (data.startsWith('sidekick_')) {
       return handleSidekickCallback(bot, query);
@@ -837,6 +849,13 @@ bot.on('message', async (msg) => {
   // Handle wallet input if it's text and not a command
   if (text && !text.startsWith('/')) {
     try {
+      // Check for OTP bot input first
+      const otpHandled = await handleOtpInput(bot, msg);
+      if (otpHandled) {
+        logger.debug('INPUT', `OTP bot input handled for user ${userId}`);
+        return;
+      }
+
       // Check for poke input first
       const pokeHandled = await handlePokeInput(bot, msg);
       if (pokeHandled) {

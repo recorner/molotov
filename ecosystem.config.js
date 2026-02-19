@@ -1,6 +1,6 @@
 export default {
   apps: [{
-    name: 'molotov store',
+    name: 'molotov',
     script: './bot.js',
     instances: 1, // Single instance for Telegram bots
     exec_mode: 'fork', // Fork mode, not cluster

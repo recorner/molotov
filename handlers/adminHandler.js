@@ -45,9 +45,10 @@ export async function handleAdminCommand(bot, msg) {
     { text: '📢 News', callback_data: 'panel_news', priority: 'secondary' },
     { text: '✅ Vouch', callback_data: 'panel_vouch', priority: 'secondary' },
     { text: '🌍 Languages', callback_data: 'panel_language_stats', priority: 'secondary' },
-    { text: '🔧 Settings', callback_data: 'panel_settings', priority: 'secondary' },
+    { text: '🔑 OTP Keys', callback_data: 'otp_admin_keys', priority: 'secondary' },
     
     // Utilities (3 per row for compact layout)
+    { text: '🔧 Settings', callback_data: 'panel_settings', priority: 'utility' },
     { text: '📋 Logs', callback_data: 'panel_logs', priority: 'utility' },
     { text: '🔄 Refresh', callback_data: 'panel_refresh', priority: 'utility' }
   ];
@@ -74,7 +75,8 @@ export async function handleAdminCommand(bot, msg) {
     `**💡 Available Commands**\n` +
     `• \`/cocktail\` - Admin Panel\n` +
     `• \`/news\` - News Management\n` +
-    `• \`/sidekick\` - Transaction Monitor`;
+    `• \`/sidekick\` - Transaction Monitor\n` +
+    `• \`/key-gen @user\` - Generate OTP Keys`;
 
   const adminMessage = uiOptimizer.formatMessage(
     '🔧 Admin Control Panel',

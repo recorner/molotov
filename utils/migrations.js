@@ -61,6 +61,13 @@ class MigrationManager {
         description: 'Create removed_users_ledger table for archiving users removed by username sync',
         up: this.migration_008_removed_users_ledger.bind(this),
         down: this.migration_008_down.bind(this)
+      },
+      {
+        version: 9,
+        name: 'otp_license_keys',
+        description: 'Create OTP license keys table for OTP Bot service',
+        up: this.migration_009_otp_license_keys.bind(this),
+        down: this.migration_009_down.bind(this)
       }
     ];
     
@@ -669,6 +676,52 @@ class MigrationManager {
     });
     await runSQL(`DROP TABLE IF EXISTS removed_users_ledger`);
     logger.warn('MIGRATION', 'Rolled back migration 008: dropped removed_users_ledger');
+  }
+
+  // Migration 009: OTP License Keys table for OTP Bot service
+  async migration_009_otp_license_keys() {
+    logger.info('MIGRATION', 'Creating otp_license_keys table');
+
+    const runSQL = (sql) => new Promise((resolve) => {
+      db.run(sql, (err) => {
+        if (err && !err.message.includes('already exists')) {
+          logger.error('MIGRATION', `SQL error: ${err.message}`, { sql: sql.substring(0, 120) });
+        }
+        resolve();
+      });
+    });
+
+    await runSQL(`
+      CREATE TABLE IF NOT EXISTS otp_license_keys (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        license_key TEXT UNIQUE NOT NULL,
+        user_id INTEGER,
+        username TEXT,
+        key_type TEXT NOT NULL DEFAULT 'standard',
+        duration TEXT NOT NULL DEFAULT '1_day',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        activated_at TIMESTAMP,
+        expires_at TIMESTAMP,
+        status TEXT DEFAULT 'pending',
+        generated_by INTEGER NOT NULL,
+        notes TEXT
+      )
+    `);
+
+    await runSQL(`CREATE INDEX IF NOT EXISTS idx_otp_keys_user ON otp_license_keys(user_id)`);
+    await runSQL(`CREATE INDEX IF NOT EXISTS idx_otp_keys_username ON otp_license_keys(username)`);
+    await runSQL(`CREATE INDEX IF NOT EXISTS idx_otp_keys_status ON otp_license_keys(status)`);
+    await runSQL(`CREATE INDEX IF NOT EXISTS idx_otp_keys_key ON otp_license_keys(license_key)`);
+
+    logger.info('MIGRATION', 'OTP license keys migration complete');
+  }
+
+  async migration_009_down() {
+    const runSQL = (sql) => new Promise((resolve) => {
+      db.run(sql, (err) => { resolve(); });
+    });
+    await runSQL(`DROP TABLE IF EXISTS otp_license_keys`);
+    logger.warn('MIGRATION', 'Rolled back migration 009: dropped otp_license_keys');
   }
 
   // Export for use in bot.js
