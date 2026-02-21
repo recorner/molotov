@@ -31,13 +31,10 @@
   "license": "ISC",
   "description": "Production-grade Telegram bot with advanced cryptocurrency transaction management (Sidekick System)",
   "dependencies": {
-    "axios": "^1.10.0",
-    "bitcoinjs-lib": "^6.1.7",
     "dotenv": "^16.6.1",
     "ioredis": "^5.6.1",
     "node-cron": "^4.1.1",
     "node-telegram-bot-api": "^0.66.0",
-    "redis": "^5.6.1",
     "sqlite3": "^5.1.7"
   },
   "engines": {
