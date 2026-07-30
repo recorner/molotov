@@ -6,15 +6,6 @@ import { stockCount } from '$lib/util';
 export const load: PageServerLoad = async ({ parent }) => {
   const { user } = await parent();
 
-  // Get user's order count
-  const orders = await prisma.order.count({
-    where: {
-      buyer: {
-        id: user.id,
-      },
-    },
-  });
-
   // Homepage showcase + advertising configuration (admin-managed key/value settings).
   const settingsRows = await prisma.settings.findMany({ select: { key: true, value: true } });
   const s = Object.fromEntries(settingsRows.map((r) => [r.key, r.value])) as Record<string, string>;
@@ -46,6 +37,66 @@ export const load: PageServerLoad = async ({ parent }) => {
       },
     },
   };
+
+  // ---------- Public landing (no login) ----------
+  if (!user) {
+    const [productCount, categoryCount, binCount, escrowCount, featured, landingCategories] = await Promise.all([
+      prisma.product.count({ where: { NOT: { tags: { has: ProductTags.DELETED } } } }),
+      prisma.category.count(),
+      prisma.bin.count(),
+      prisma.escrow.count(),
+      prisma.product
+        .findMany({
+          where: { NOT: { tags: { has: ProductTags.DELETED } } },
+          orderBy: { createdAt: 'desc' },
+          take: 8,
+          select: {
+            id: true,
+            name: true,
+            shortDesc: true,
+            image: true,
+            price: true,
+            stock: true,
+            type: true,
+            category: { select: { id: true, name: true } },
+            seller: { select: { id: true, username: true } },
+          },
+        })
+        .then((products) =>
+          products.map((p) => ({ ...p, stock: p.type !== ProductType.LICENSE ? '∞' : stockCount(p.stock) }))
+        ),
+      prisma.category
+        .findMany({
+          select: {
+            id: true,
+            name: true,
+            image: true,
+            order: true,
+            _count: { select: { products: { where: { NOT: { tags: { has: ProductTags.DELETED } } } } } },
+          },
+        })
+        .then((cats) =>
+          cats
+            .sort((a, b) => a.order - b.order)
+            .map((c) => ({
+              ...c,
+              image: c.image ? `${process.env.UPLOAD_PREFIX}/${c.image}` : null,
+              productCount: c._count.products,
+            }))
+        ),
+    ]);
+
+    return {
+      user: null,
+      home,
+      landing: { productCount, categoryCount, binCount, escrowCount },
+      featuredProducts: featured,
+      categoriesWithCounts: landingCategories,
+    };
+  }
+
+  // Get user's order count
+  const orders = await prisma.order.count({ where: { buyer: { id: user.id } } });
 
   // Get latest announcements
   const announcements = await prisma.announcement.findMany({
@@ -83,6 +134,7 @@ export const load: PageServerLoad = async ({ parent }) => {
       id: true,
       name: true,
       shortDesc: true,
+            image: true,
       price: true,
       stock: true,
       type: true,
@@ -146,6 +198,7 @@ export const load: PageServerLoad = async ({ parent }) => {
       id: product.id,
       name: product.name,
       shortDesc: product.shortDesc,
+      image: product.image,
       price: product.price,
       stock: product.type !== ProductType.LICENSE ? '∞' : stockCount(product.stock),
       type: product.type,
@@ -176,6 +229,7 @@ export const load: PageServerLoad = async ({ parent }) => {
       id: true,
       name: true,
       shortDesc: true,
+            image: true,
       price: true,
       stock: true,
       type: true,

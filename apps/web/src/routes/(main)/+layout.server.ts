@@ -4,12 +4,10 @@ import jwt from 'jsonwebtoken';
 import prisma from '$lib/prisma';
 
 export const load: LayoutServerLoad = async ({ cookies, url }) => {
-  // Public, login-free surfaces: the escrow entry + deal pages.
-  // `/` is NOT public here — the home page is the signed-in dashboard and its
-  // loader dereferences `user`. (The public landing it was paired with is not
-  // part of this deployment.) Everything else requires an account.
+  // Public, login-free surfaces: the landing page, the escrow entry + deal pages,
+  // and the BIN lookup tool. Everything else still requires an account.
   const p = url.pathname;
-  const guestAllowed = p === '/escrow' || /^\/escrow\/[A-Za-z0-9]{5,8}$/.test(p);
+  const guestAllowed = p === '/' || p === '/bin' || p === '/escrow' || /^\/escrow\/[A-Za-z0-9]{5,8}$/.test(p);
   const asGuest = () => ({ user: null, categories: [], cart: [] as { id: number; quantity: number }[] });
 
   // validate jwt

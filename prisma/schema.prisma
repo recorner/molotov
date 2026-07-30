@@ -131,7 +131,9 @@ model Product {
   sku           String?
   status        String?   @default("active")
   stockQuantity Int?      @default(-1) @map("stock_quantity")
-  imageUrl      String?   @map("image_url")
+  // The web app calls this `image`, the bot's SQL calls the column `image_url`.
+  // Same concept, one column — the web app selects `image` on Product.
+  image         String?   @map("image_url")
   createdBy     BigInt?   @map("created_by")
   sortOrder     Int?      @default(0) @map("sort_order")
   updatedAt     DateTime? @updatedAt @map("updated_at")
@@ -178,6 +180,27 @@ model CartEntry {
   product   Product  @relation(fields: [productId], references: [id])
 
   @@map("cart_entries")
+}
+
+/// Card-issuer reference data: BIN -> issuing bank, brand, type, country.
+/// Public reference data used for issuer identification (the same shape served
+/// by binlist and similar). Loaded from a CSV via the admin seed endpoint.
+model Bin {
+  bin         String  @id
+  brand       String?
+  type        String?
+  category    String?
+  issuer      String?
+  issuerPhone String? @map("issuer_phone")
+  issuerUrl   String? @map("issuer_url")
+  isoCode2    String? @map("iso_code2")
+  isoCode3    String? @map("iso_code3")
+  countryName String? @map("country_name")
+
+  @@index([issuer])
+  @@index([countryName])
+  @@index([brand])
+  @@map("bins")
 }
 
 // ============================ WEB (Sereni) ===================================

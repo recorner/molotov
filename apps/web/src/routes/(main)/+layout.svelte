@@ -60,6 +60,7 @@
         </a>
         <nav class="hidden sm:flex items-center gap-6 text-sm">
           <a href="/escrow" class="text-neutral-300 hover:text-emerald-300 transition" class:text-emerald-400={isActive('/escrow')}>Escrow</a>
+          <a href="/bin" class="text-neutral-300 hover:text-emerald-300 transition" class:text-emerald-400={isActive('/bin')}>BIN lookup</a>
         </nav>
         <div class="flex items-center gap-3 text-sm">
           <a href="/auth/login" class="text-neutral-300 hover:text-emerald-300 transition">Sign in</a>
@@ -77,6 +78,7 @@
         </div>
         <div class="flex sm:justify-end gap-5 text-sm text-neutral-400">
           <a href="/escrow" class="hover:text-emerald-300">Escrow</a>
+          <a href="/bin" class="hover:text-emerald-300">BIN lookup</a>
           <a href="/auth/login" class="hover:text-emerald-300">Sign in</a>
         </div>
       </div>
@@ -137,6 +139,10 @@
     <a href="/chat" class="link" class:active={isActive('/chat')} on:click={closeOnMobile}>
       <QuickIcon icon="material-symbols:chat-bubble-outline" className="icon" />
       <span>Chat</span>
+    </a>
+    <a href="/bin" class="link" class:active={isActive('/bin')} on:click={closeOnMobile}>
+      <QuickIcon icon="material-symbols:credit-card-outline" className="icon" />
+      <span>BIN lookup</span>
     </a>
 
     <div class="divider"><span>Categories</span></div>
