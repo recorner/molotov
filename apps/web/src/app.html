@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<link rel="icon" type="image/png" href="%sveltekit.assets%/favicon.png" />
+		<link rel="apple-touch-icon" href="%sveltekit.assets%/apple-touch-icon.png" />
+		<link rel="manifest" href="%sveltekit.assets%/site.webmanifest" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		
+		<!-- Critical CSS for faster loading -->
+		<style>
+			/* Prevent layout shift during icon loading */
+			.icon {
+				display: inline-block;
+				width: 1rem;
+				height: 1rem;
+				min-width: 1rem;
+				min-height: 1rem;
+			}
+			
+			/* Loading skeleton for icons */
+			.icon-skeleton {
+				background: linear-gradient(90deg, #374151 25%, #4b5563 50%, #374151 75%);
+				background-size: 200% 100%;
+				animation: loading 1.5s infinite;
+				border-radius: 2px;
+			}
+			
+			@keyframes loading {
+				0% { background-position: 200% 0; }
+				100% { background-position: -200% 0; }
+			}
+		</style>
+		
+		%sveltekit.head%
+	</head>
+	<body data-sveltekit-preload-data="hover">
+		<div style="display: contents">%sveltekit.body%</div>
+	</body>
+</html>

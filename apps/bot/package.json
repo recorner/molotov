@@ -1,0 +1,43 @@
+{
+  "name": "molotov",
+  "version": "2.0.0",
+  "type": "module",
+  "main": "bot.js",
+  "scripts": {
+    "start": "npm run start:redis && node bot.js",
+    "start:redis": "redis-server --daemonize yes --port 6379 || echo 'Redis already running or not installed'",
+    "dev": "node --watch bot.js",
+    "build": "npm run build:translations",
+    "build:translations": "node scripts/build-translations-optimized.js",
+    "build:translations:full": "node scripts/build-translations.js",
+    "prebuild": "npm run build:translations",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "migrate": "node -e \"import('./utils/migrations.js').then(m => m.MigrationManager.runMigrationsIfNeeded())\"",
+    "backup": "node scripts/backup.js",
+    "health": "node scripts/health-check.js",
+    "redis:start": "redis-server --daemonize yes",
+    "redis:stop": "redis-cli shutdown || echo 'Redis not running'",
+    "redis:status": "redis-cli ping || echo 'Redis not responding'"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "cryptocurrency",
+    "bitcoin",
+    "litecoin",
+    "payments"
+  ],
+  "author": "Molotov Team",
+  "license": "ISC",
+  "description": "Production-grade Telegram bot with advanced cryptocurrency transaction management (Sidekick System)",
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "ioredis": "^5.6.1",
+    "node-cron": "^4.1.1",
+    "node-telegram-bot-api": "^0.66.0",
+    "sqlite3": "^5.1.7"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,0 +1,785 @@
+// =============================================================================
+// Unified schema — molotov (Telegram bot) + Sereni (SvelteKit web) on ONE database.
+//
+// Design rule: physical tables/columns keep molotov's existing snake_case names,
+// so the bot's raw SQL stays valid. Prisma model/field names keep Sereni's
+// camelCase names, so the web app's TypeScript stays valid. `@map`/`@@map`
+// bridges the two. Neither side had to be rewritten to share storage.
+//
+// Collision resolutions (both sides kept their own contract):
+//   users.username        -> bot's Telegram handle (Prisma: telegramUsername)
+//                            web login handle lives in login_username (Prisma: username)
+//   payouts               -> bot's crypto payouts (Prisma: SidekickPayout)
+//                            web seller payouts live in seller_payouts (Prisma: Payout)
+//   categories.name       -> unique per parent, not globally (molotov is a tree)
+//   orders.status         -> OrderStatus enum extended with molotov fulfilment states
+//
+// NOTE ON FOREIGN KEYS: molotov stores *Telegram IDs* in most bot-table `user_id`
+// columns (admins, PIN owners, audit actors) — NOT users.id. Those are therefore
+// plain columns with no FK, which is deliberate, not an oversight.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+// ============================== SHARED CORE ==================================
+
+model User {
+  id       Int    @id @default(autoincrement())
+  // Web identity (Sereni). Mapped off `username` so the bot keeps that column.
+  username String @unique @map("login_username")
+  // Optional: Telegram-native users have no web password until they register.
+  password String?
+  userIcon String? @map("user_icon")
+
+  md2faCodes      String[] @map("md2fa_codes")
+  role            Role[]
+  balance         Float    @default(0)
+  twoFactorSecret String?  @map("two_factor_secret")
+  avatar          String?
+  telegram        String?
+  telegramLinked  Boolean  @default(false) @map("telegram_linked")
+  lastSeen        DateTime? @map("last_seen")
+
+  // --- Telegram identity (molotov) ---------------------------------------
+  telegramId       String? @unique @map("telegram_id")
+  telegramUsername String? @map("username")
+  firstName        String? @map("first_name")
+  lastName         String? @map("last_name")
+  languageCode     String? @map("language_code")
+  languageUpdatedAt DateTime? @map("language_updated_at")
+  timezone         String? @default("UTC")
+  preferences      String?
+  status           String? @default("active")
+
+  // Deliverability tracking (molotov usernameNormalizer / broadcast pruning)
+  reachable         Boolean?  @default(true)
+  unreachableSince  DateTime? @map("unreachable_since")
+  unreachableReason String?   @map("unreachable_reason")
+  lastProbeAt       DateTime? @map("last_probe_at")
+
+  createdAt    DateTime  @default(now()) @map("created_at")
+  lastActivity DateTime? @map("last_activity")
+
+  announcements    Announcement[]
+  chatMemberships  ChatMember[]
+  chatMessages     ChatMessage[]
+  escrowEvents     EscrowEvent[]
+  escrowMessages   EscrowMessage[]
+  escrowsBuying    Escrow[]          @relation("EscrowBuyer")
+  escrowsSelling   Escrow[]          @relation("EscrowSeller")
+  notifications    Notification[]
+  orders           Order[]
+  payouts          Payout[]
+  products         Product[]
+  telegramSessions TelegramSession[]
+  topUps           TopUp[]
+
+  @@map("users")
+}
+
+model Category {
+  id    Int     @id @default(autoincrement())
+  name  String
+  image String?
+  // Sereni called this `order`; molotov called it `sort_order`. Same concept.
+  order Int     @default(0) @map("sort_order")
+
+  // molotov: categories form a tree, so names repeat across branches.
+  parentId    Int?       @map("parent_id")
+  parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryTree")
+  status      String?    @default("active")
+  description String?
+  createdBy   BigInt?    @map("created_by")
+  createdAt   DateTime?  @default(now()) @map("created_at")
+  updatedAt   DateTime?  @updatedAt @map("updated_at")
+
+  products Product[]
+
+  @@unique([parentId, name])
+  @@map("categories")
+}
+
+model Product {
+  id          Int           @id @default(autoincrement())
+  name        String
+  description String        @default("")
+  price       Float
+  type        ProductType   @default(DOWNLOAD)
+  tags        ProductTags[] @default([])
+  shortDesc   String        @default("") @map("short_desc")
+  // Sereni license/download payload (one line per buyer for LICENSE).
+  stock       String        @default("")
+
+  categoryId Int? @map("category_id")
+  category   Category? @relation(fields: [categoryId], references: [id])
+
+  // Sereni requires a seller; migrated molotov products get the system seller.
+  userId Int  @map("seller_id")
+  seller User @relation(fields: [userId], references: [id])
+
+  // --- molotov catalog fields --------------------------------------------
+  valueBalance  Float?    @default(0) @map("value_balance")
+  sku           String?
+  status        String?   @default("active")
+  stockQuantity Int?      @default(-1) @map("stock_quantity")
+  imageUrl      String?   @map("image_url")
+  createdBy     BigInt?   @map("created_by")
+  sortOrder     Int?      @default(0) @map("sort_order")
+  updatedAt     DateTime? @updatedAt @map("updated_at")
+
+  createdAt   DateTime    @default(now()) @map("created_at")
+  cartEntries CartEntry[]
+
+  @@map("products")
+}
+
+model Order {
+  id     Int         @id @default(autoincrement())
+  status OrderStatus @default(PENDING)
+
+  userId Int  @map("user_id")
+  buyer  User @relation(fields: [userId], references: [id])
+
+  // molotov addressed buyers by Telegram ID; kept alongside the FK so bot
+  // lookups stay a single indexed read.
+  telegramId String? @map("telegram_id")
+
+  // --- molotov single-product order fields --------------------------------
+  productId Int?    @map("product_id")
+  price     Float?
+  amount    Float?
+  currency  String?
+
+  createdAt DateTime    @default(now()) @map("created_at")
+  cart      CartEntry[]
+
+  @@index([telegramId])
+  @@index([status])
+  @@map("orders")
+}
+
+model CartEntry {
+  id        Int      @id @default(autoincrement())
+  quantity  Int
+  productId Int      @map("product_id")
+  orderId   Int?     @map("order_id")
+  delivered String?
+  createdAt DateTime @default(now()) @map("created_at")
+  order     Order?   @relation(fields: [orderId], references: [id])
+  product   Product  @relation(fields: [productId], references: [id])
+
+  @@map("cart_entries")
+}
+
+// ============================ WEB (Sereni) ===================================
+
+model TopUp {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  amount    Float
+  reference String?  @unique
+  completed Boolean  @default(false)
+  status    String   @default("pending")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  paymentNotification PaymentNotification?
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("top_ups")
+}
+
+/// Seller payouts (Sereni). The bot's crypto payouts live in `SidekickPayout`.
+model Payout {
+  id             Int          @id @default(autoincrement())
+  amount         Float
+  status         PayoutStatus @default(PENDING)
+  rejectedReason String?      @map("rejected_reason")
+  userId         Int?         @map("user_id")
+  address        String
+  currency       String?
+  escrowId       Int?         @map("escrow_id")
+  guestName      String?      @map("guest_name")
+  providerRef    String?      @map("provider_ref")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  paidAt         DateTime?    @map("paid_at")
+  user           User?        @relation(fields: [userId], references: [id])
+
+  @@index([status])
+  @@map("seller_payouts")
+}
+
+model Settings {
+  id    Int    @id @default(autoincrement())
+  key   String @unique
+  value String
+
+  @@map("settings")
+}
+
+model Announcement {
+  id        Int      @id @default(autoincrement())
+  title     String
+  body      String
+  createdAt DateTime @default(now()) @map("created_at")
+  userId    Int      @map("user_id")
+  poster    User     @relation(fields: [userId], references: [id])
+
+  @@map("announcements")
+}
+
+model TelegramSession {
+  id        String   @id @default(uuid())
+  chatId    String   @map("chat_id")
+  sessionId String   @unique @map("session_id")
+  loginCode String?  @map("login_code")
+  isActive  Boolean  @default(true) @map("is_active")
+  expiresAt DateTime @map("expires_at")
+  userId    Int?     @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([chatId])
+  @@index([sessionId])
+  @@index([loginCode])
+  @@map("telegram_sessions")
+}
+
+model PaymentNotification {
+  id               Int       @id @default(autoincrement())
+  topUpId          Int       @unique @map("top_up_id")
+  telegramUsername String?   @map("telegram_username")
+  notificationSent Boolean   @default(false) @map("notification_sent")
+  sentAt           DateTime? @map("sent_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  topUp            TopUp     @relation(fields: [topUpId], references: [id])
+
+  @@index([telegramUsername])
+  @@index([notificationSent])
+  @@map("payment_notifications")
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  type      String   @default("system")
+  title     String
+  body      String   @default("")
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model Conversation {
+  id            Int           @id @default(autoincrement())
+  type          String        @default("dm")
+  title         String?
+  description   String?
+  isPublic      Boolean       @default(false) @map("is_public")
+  archived      Boolean       @default(false)
+  createdById   Int?          @map("created_by_id")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  lastMessageAt DateTime      @default(now()) @map("last_message_at")
+  members       ChatMember[]
+  messages      ChatMessage[]
+
+  @@index([type])
+  @@index([lastMessageAt])
+  @@map("conversations")
+}
+
+model ChatMember {
+  id             Int          @id @default(autoincrement())
+  conversationId Int          @map("conversation_id")
+  userId         Int          @map("user_id")
+  role           String       @default("member")
+  lastReadAt     DateTime?    @map("last_read_at")
+  joinedAt       DateTime     @default(now()) @map("joined_at")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@map("chat_members")
+}
+
+model ChatMessage {
+  id             Int          @id @default(autoincrement())
+  conversationId Int          @map("conversation_id")
+  senderId       Int?         @map("sender_id")
+  body           String       @default("")
+  fileUrl        String?      @map("file_url")
+  fileName       String?      @map("file_name")
+  fileType       String?      @map("file_type")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User?        @relation(fields: [senderId], references: [id])
+
+  @@index([conversationId, createdAt])
+  @@map("chat_messages")
+}
+
+model Escrow {
+  id             Int          @id @default(autoincrement())
+  publicId       String?      @unique @map("public_id")
+  title          String
+  description    String       @default("")
+  amount         Float
+  fee            Float        @default(0)
+  status         EscrowStatus @default(PROPOSED)
+  isGuest        Boolean      @default(false) @map("is_guest")
+  creatorSide    String       @default("buyer") @map("creator_side")
+  buyerId        Int?         @map("buyer_id")
+  sellerId       Int?         @map("seller_id")
+  createdById    Int?         @map("created_by_id")
+  buyerName      String?      @map("buyer_name")
+  buyerEmail     String?      @map("buyer_email")
+  buyerTelegram  String?      @map("buyer_telegram")
+  sellerName     String?      @map("seller_name")
+  sellerEmail    String?      @map("seller_email")
+  sellerTelegram String?      @map("seller_telegram")
+  shareToken     String?      @unique @map("share_token")
+  buyerToken     String?      @unique @map("buyer_token")
+  sellerToken    String?      @unique @map("seller_token")
+  fundingRef     String?      @map("funding_ref")
+  payoutAddress  String?      @map("payout_address")
+  payoutCurrency String?      @map("payout_currency")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  acceptedAt     DateTime?    @map("accepted_at")
+  fundedAt       DateTime?    @map("funded_at")
+  deliveredAt    DateTime?    @map("delivered_at")
+  completedAt    DateTime?    @map("completed_at")
+  closedAt       DateTime?    @map("closed_at")
+
+  buyer    User?           @relation("EscrowBuyer", fields: [buyerId], references: [id])
+  seller   User?           @relation("EscrowSeller", fields: [sellerId], references: [id])
+  events   EscrowEvent[]
+  messages EscrowMessage[]
+
+  @@index([buyerId])
+  @@index([sellerId])
+  @@index([status])
+  @@index([fundingRef])
+  @@map("escrows")
+}
+
+model EscrowMessage {
+  id         Int       @id @default(autoincrement())
+  escrowId   Int       @map("escrow_id")
+  senderId   Int?      @map("sender_id")
+  senderName String?   @map("sender_name")
+  fromAdmin  Boolean   @default(false) @map("from_admin")
+  body       String
+  readAt     DateTime? @map("read_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  escrow     Escrow    @relation(fields: [escrowId], references: [id], onDelete: Cascade)
+  sender     User?     @relation(fields: [senderId], references: [id])
+
+  @@index([escrowId])
+  @@map("escrow_messages")
+}
+
+model EscrowEvent {
+  id        Int      @id @default(autoincrement())
+  escrowId  Int      @map("escrow_id")
+  type      String
+  message   String   @default("")
+  actorId   Int?     @map("actor_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  escrow    Escrow   @relation(fields: [escrowId], references: [id], onDelete: Cascade)
+  actor     User?    @relation(fields: [actorId], references: [id])
+
+  @@index([escrowId])
+  @@map("escrow_events")
+}
+
+// ======================== BOT (molotov / Sidekick) ===========================
+// `user_id` columns below hold Telegram IDs (admins/actors), so they carry no FK.
+
+model WalletAddress {
+  id          Int      @id @default(autoincrement())
+  currency    String
+  address     String
+  label       String
+  tag         String
+  addedBy     BigInt   @map("added_by")
+  addedAt     DateTime @default(now()) @map("added_at")
+  privateKey  String?  @map("private_key")
+  isEncrypted Boolean? @default(false) @map("is_encrypted")
+
+  @@map("wallet_addresses")
+}
+
+model DetectedTransaction {
+  id               Int      @id @default(autoincrement())
+  txid             String
+  currency         String
+  address          String
+  amount           Float
+  confirmations    Int?     @default(0)
+  blockHeight      Int?     @map("block_height")
+  detectedAt       DateTime @default(now()) @map("detected_at")
+  processed        Boolean? @default(false)
+  notificationSent Boolean? @default(false) @map("notification_sent")
+
+  @@index([txid])
+  @@map("detected_transactions")
+}
+
+/// Bot crypto payouts (Sidekick). Seller payouts live in `Payout`.
+model SidekickPayout {
+  id                 Int       @id @default(autoincrement())
+  currency           String
+  toAddress          String    @map("to_address")
+  amount             Float
+  status             String?   @default("pending")
+  txid               String?
+  createdBy          BigInt    @map("created_by")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  processedAt        DateTime? @map("processed_at")
+  notes              String?
+  feeAmount          Float?    @default(0) @map("fee_amount")
+  priority           String?   @default("normal")
+  batchId            String?   @map("batch_id")
+  scheduledAt        DateTime? @map("scheduled_at")
+  recurrenceType     String?   @map("recurrence_type")
+  recurrenceInterval Int?      @default(0) @map("recurrence_interval")
+
+  @@map("payouts")
+}
+
+model AutoSettlement {
+  id           Int      @id @default(autoincrement())
+  currency     String
+  address      String
+  percentage   Float
+  label        String
+  enabled      Boolean? @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  minThreshold Float?   @default(0) @map("min_threshold")
+  maxAmount    Float?   @map("max_amount")
+
+  @@map("auto_settlement")
+}
+
+model SettlementExecution {
+  id           Int      @id @default(autoincrement())
+  triggerType  String   @map("trigger_type")
+  executedAt   DateTime @default(now()) @map("executed_at")
+  totalAmount  Float    @map("total_amount")
+  currency     String
+  rulesApplied Int      @map("rules_applied")
+  status       String?  @default("completed")
+  errorMessage String?  @map("error_message")
+
+  @@map("settlement_executions")
+}
+
+model TransactionPin {
+  id             Int       @id @default(autoincrement())
+  userId         BigInt    @map("user_id")
+  pinHash        String    @map("pin_hash")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  lastUsed       DateTime? @map("last_used")
+  failedAttempts Int?      @default(0) @map("failed_attempts")
+  lockedUntil    DateTime? @map("locked_until")
+
+  @@map("transaction_pins")
+}
+
+model SidekickSetting {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @default(now()) @map("updated_at")
+  category  String?  @default("general")
+  updatedBy BigInt?  @map("updated_by")
+
+  @@map("sidekick_settings")
+}
+
+model SecurityLog {
+  id        Int      @id @default(autoincrement())
+  userId    BigInt   @map("user_id")
+  action    String
+  details   String?
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  success   Boolean
+  timestamp DateTime @default(now())
+
+  @@map("security_log")
+}
+
+model AdminGroup {
+  id        Int      @id @default(autoincrement())
+  groupId   BigInt   @unique @map("group_id")
+  groupName String?  @map("group_name")
+  addedAt   DateTime @default(now()) @map("added_at")
+  isActive  Boolean? @default(true) @map("is_active")
+
+  admins GroupAdmin[]
+
+  @@map("admin_groups")
+}
+
+model GroupAdmin {
+  id        Int      @id @default(autoincrement())
+  groupId   BigInt   @map("group_id")
+  userId    BigInt   @map("user_id")
+  username  String?
+  firstName String?  @map("first_name")
+  status    String?  @default("administrator")
+  addedAt   DateTime @default(now()) @map("added_at")
+  lastSeen  DateTime @default(now()) @map("last_seen")
+
+  group AdminGroup @relation(fields: [groupId], references: [groupId])
+
+  @@unique([groupId, userId])
+  @@map("group_admins")
+}
+
+model NewsAnnouncement {
+  id              Int       @id @default(autoincrement())
+  title           String
+  content         String
+  targetLanguages String    @map("target_languages")
+  createdBy       BigInt    @map("created_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  scheduledAt     DateTime? @map("scheduled_at")
+  sentAt          DateTime? @map("sent_at")
+  status          String?   @default("draft")
+  recipientsCount Int?      @default(0) @map("recipients_count")
+  successCount    Int?      @default(0) @map("success_count")
+  failedCount     Int?      @default(0) @map("failed_count")
+
+  recipients   NewsRecipient[]
+  deliveryLogs NewsDeliveryLog[]
+
+  @@map("news_announcements")
+}
+
+model NewsRecipient {
+  id             Int       @id @default(autoincrement())
+  announcementId Int       @map("announcement_id")
+  userId         BigInt    @map("user_id")
+  status         String?   @default("pending")
+  sentAt         DateTime? @map("sent_at")
+  errorMessage   String?   @map("error_message")
+
+  announcement NewsAnnouncement @relation(fields: [announcementId], references: [id])
+
+  @@map("news_recipients")
+}
+
+model NewsDeliveryLog {
+  id           Int      @id @default(autoincrement())
+  newsId       Int      @map("news_id")
+  userId       BigInt   @map("user_id")
+  telegramId   BigInt   @map("telegram_id")
+  languageCode String?  @map("language_code")
+  status       String
+  errorMessage String?  @map("error_message")
+  sentAt       DateTime @default(now()) @map("sent_at")
+
+  news NewsAnnouncement @relation(fields: [newsId], references: [id])
+
+  @@map("news_delivery_log")
+}
+
+model RemovedUserLedger {
+  id                Int       @id @default(autoincrement())
+  telegramId        BigInt    @map("telegram_id")
+  username          String?
+  firstName         String?   @map("first_name")
+  lastName          String?   @map("last_name")
+  languageCode      String?   @map("language_code")
+  originalCreatedAt String?   @map("original_created_at")
+  lastActivity      String?   @map("last_activity")
+  removalReason     String    @map("removal_reason")
+  removalCategory   String    @map("removal_category")
+  apiErrorMessage   String?   @map("api_error_message")
+  removedAt         DateTime  @default(now()) @map("removed_at")
+  restoredAt        DateTime? @map("restored_at")
+  notes             String?
+
+  @@index([telegramId])
+  @@index([removalCategory])
+  @@index([removedAt])
+  @@map("removed_users_ledger")
+}
+
+model LegacyUser {
+  id                Int      @id @default(autoincrement())
+  telegramId        BigInt?  @unique @map("telegram_id")
+  firstName         String?  @map("first_name")
+  lastName          String?  @map("last_name")
+  username          String?
+  languageCode      String?  @map("language_code")
+  originalCreatedAt String?  @map("original_created_at")
+  archivedAt        DateTime @default(now()) @map("archived_at")
+  archiveReason     String?  @map("archive_reason")
+  lastActivity      String?  @map("last_activity")
+  originalStatus    String?  @map("original_status")
+
+  @@map("legacy_users")
+}
+
+model OtpLicenseKey {
+  id          Int       @id @default(autoincrement())
+  licenseKey  String    @unique @map("license_key")
+  userId      BigInt?   @map("user_id")
+  username    String?
+  keyType     String    @default("standard") @map("key_type")
+  duration    String    @default("1_day")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  activatedAt DateTime? @map("activated_at")
+  expiresAt   DateTime? @map("expires_at")
+  status      String?   @default("pending")
+  generatedBy BigInt    @map("generated_by")
+  notes       String?
+
+  @@map("otp_license_keys")
+}
+
+model TranslationCache {
+  id             Int       @id @default(autoincrement())
+  sourceText     String    @map("source_text")
+  targetLanguage String    @map("target_language")
+  translatedText String    @map("translated_text")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  expiresAt      DateTime? @map("expires_at")
+  hitCount       Int?      @default(1) @map("hit_count")
+
+  @@unique([sourceText, targetLanguage])
+  @@map("translation_cache")
+}
+
+model ProductHistory {
+  id         Int      @id @default(autoincrement())
+  entityType String   @map("entity_type")
+  entityId   Int      @map("entity_id")
+  action     String
+  oldData    String?  @map("old_data")
+  newData    String?  @map("new_data")
+  changedBy  BigInt   @map("changed_by")
+  changedAt  DateTime @default(now()) @map("changed_at")
+  batchId    String?  @map("batch_id")
+  reverted   Int?     @default(0)
+
+  @@map("product_history")
+}
+
+model BulkOperation {
+  id           Int       @id @default(autoincrement())
+  batchId      String    @unique @map("batch_id")
+  type         String
+  status       String?   @default("pending_preview")
+  totalItems   Int?      @default(0) @map("total_items")
+  successCount Int?      @default(0) @map("success_count")
+  errorCount   Int?      @default(0) @map("error_count")
+  previewData  String?   @map("preview_data")
+  errors       String?
+  createdBy    BigInt    @map("created_by")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  committedAt  DateTime? @map("committed_at")
+
+  @@map("bulk_operations")
+}
+
+model LanguageStat {
+  id           Int      @id @default(autoincrement())
+  languageCode String   @unique @map("language_code")
+  userCount    Int?     @default(0) @map("user_count")
+  activeUsers  Int?     @default(0) @map("active_users")
+  dailyUsers   Int?     @default(0) @map("daily_users")
+  lastUpdated  DateTime @default(now()) @map("last_updated")
+
+  @@map("language_stats")
+}
+
+/// molotov's own migration ledger, preserved so MigrationManager stays accurate.
+model BotMigration {
+  id        Int      @id @default(autoincrement())
+  version   Int      @unique
+  name      String
+  appliedAt DateTime @default(now()) @map("applied_at")
+
+  @@map("migrations")
+}
+
+// ================================= ENUMS =====================================
+
+enum Role {
+  ADMIN
+  SELLER
+  BUYER
+}
+
+enum ProductType {
+  DOWNLOAD
+  LICENSE
+  SERVICE
+}
+
+enum ProductTags {
+  DELETED
+  FEATURED
+  NEW
+  POPULAR
+  SALE
+}
+
+/// Sereni's states plus molotov's fulfilment states (confirmed → delivered).
+enum OrderStatus {
+  PENDING
+  PAID
+  CONFIRMED
+  AWAITING_PRODUCT
+  AWAITING_DELIVERY
+  DELIVERED
+  CANCELLED
+  EXPIRED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  WAITING
+  CONFIRMED
+  FAILED
+  EXPIRED
+  REFUNDED
+}
+
+enum PayoutStatus {
+  PENDING
+  COMPLETED
+  REJECTED
+}
+
+enum EscrowStatus {
+  PROPOSED
+  ACCEPTED
+  FUNDED
+  DELIVERED
+  COMPLETED
+  DECLINED
+  CANCELLED
+  DISPUTED
+  REFUNDED
+}

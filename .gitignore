@@ -1,28 +1,30 @@
-# Environment and sensitive files
+# Environment and secrets
 .env
-encryption.key
-bot_state.encrypted
+apps/bot/encryption.key
+apps/bot/bot_state.encrypted
 
-# Node modules
+# Dependencies
 node_modules/
 
-# Generated files
+# Generated
 generated/
+apps/web/.svelte-kit/
+apps/web/.vercel/
+apps/web/build/
+.prisma/
+
+# Legacy SQLite store (migrated into Postgres; kept locally as the import source)
+*.db
+backups/
 
 # Logs
 logs/
 *.log
 
-# IDE
+# IDE / OS
 .vscode/
 .idea/
-
-# OS
 .DS_Store
 Thumbs.db
-*.db
-
-
-# Temporary files
 *.tmp
-*.temp
+.vercel

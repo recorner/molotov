@@ -1,0 +1,119 @@
+/* Write your global styles here, in PostCSS syntax */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-neutral-950 text-neutral-100 font-opensans;
+    background-image: radial-gradient(60rem 60rem at 110% -10%, rgba(45, 212, 191, 0.06), transparent 60%),
+      radial-gradient(50rem 50rem at -10% 0%, rgba(13, 148, 136, 0.05), transparent 55%);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    @apply bg-emerald-500/30 text-white;
+  }
+
+  .font-montserrat {
+    font-family: 'Montserrat', sans-serif;
+  }
+
+  .font-opensans {
+    font-family: 'Open Sans', sans-serif;
+  }
+
+  input,
+  select,
+  textarea {
+    @apply focus:outline-none;
+  }
+
+  .error {
+    @apply !m-0 text-sm text-red-500 block;
+  }
+
+  .btn {
+    @apply block w-full px-3 py-2 bg-emerald-600 text-white font-medium rounded-lg text-sm hover:bg-emerald-500 active:bg-emerald-700 transition focus:outline-none focus:ring-2 ring-emerald-500/40 disabled:opacity-60 disabled:cursor-not-allowed;
+  }
+
+  .btn.gray {
+    @apply bg-neutral-700 hover:bg-neutral-600;
+  }
+
+  .btn.white {
+    @apply bg-white text-neutral-900 hover:bg-neutral-100;
+  }
+
+  .card {
+    @apply bg-neutral-900/70 border border-neutral-800 rounded-xl p-4 backdrop-blur-sm;
+  }
+
+  .input {
+    @apply flex gap-2 items-center bg-neutral-900 border border-neutral-700 px-3 py-2 rounded-lg focus-within:border-emerald-600/60 focus-within:ring-2 focus-within:ring-emerald-600/15 transition;
+  }
+
+  .page-btn {
+    @apply rounded-full hover:bg-neutral-700 transition p-1;
+  }
+
+  /* Table Styles */
+  table {
+    @apply w-full border-collapse;
+  }
+
+  table th {
+    @apply text-left font-semibold text-neutral-300 text-sm py-3 px-4 border-b border-neutral-700;
+  }
+
+  table td {
+    @apply py-3 px-4 border-b border-neutral-800/50;
+  }
+
+  table tbody tr {
+    @apply hover:bg-neutral-800/30 transition-colors;
+  }
+
+  table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+
+  /* Custom scrollbar for sidebar */
+  aside::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  aside::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  aside::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+  }
+
+  aside::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  /* Mobile responsive utilities */
+  @media (max-width: 768px) {
+    .mobile-hidden {
+      display: none;
+    }
+  }
+
+  th,
+  td {
+    @apply text-left px-4 py-3;
+  }
+
+  th,
+  tfoot > tr {
+    @apply bg-neutral-800;
+  }
+
+  tr:nth-child(even) {
+    @apply bg-neutral-800/25;
+  }
+}

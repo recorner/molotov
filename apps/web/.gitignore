@@ -1,0 +1,53 @@
+.DS_Store
+node_modules
+/build
+/.svelte-kit
+/package
+.env
+.env.*
+!.env.example
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+data/
+haproxy/bundle.pem
+.VSCodeCounter
+
+# Additional production-grade gitignore
+.pnpm-store/
+# pnpm-lock.yaml - SHOULD NOT BE IGNORED FOR PRODUCTION
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Test files
+test_*.js
+test_*.cjs
+test_*.sh
+
+# Auth backups
+src/routes/auth.zip
+src/routes/auth_original.zip
+
+# Uploads
+uploads/
+static/uploads/
+
+# Docker volumes
+postgres_data/
+minio_data/
+minio_config/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+*.swp
+*.swo
+*~
+.vercel
