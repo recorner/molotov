@@ -35,15 +35,16 @@ for (const t of [
 ]) {
   const before = await sOne(`SELECT COUNT(*) c FROM ${t}`);
   const after = await one(`SELECT COUNT(*) c FROM "${t}"`);
-  // Three tables legitimately exceed their SQLite source now that the merged
-  // database is live rather than a migration target:
-  //   users                 +1 system seller, +27 rebuilt buyers, then real signups
-  //   detected_transactions grows once blockchain monitoring is actually running
-  // Everything else must still match the source exactly.
-  const MIGRATION_BASELINE = { users: before + 28, detected_transactions: before };
-  const baseline = MIGRATION_BASELINE[t];
-  const ok = baseline !== undefined ? after >= baseline : after === before;
-  const note = baseline !== undefined && after > baseline ? ` (+${after - baseline} since migration)` : '';
+  // The merged database is live, so these tables drift from the SQLite source by
+  // design and are reported rather than asserted:
+  //   users                 +1 system seller, +27 rebuilt buyers, signups, retirements
+  //   removed_users_ledger  grows on every nightly username sync
+  //   detected_transactions grows once blockchain monitoring is running
+  // Everything else is immutable history and must still match exactly.
+  const LIVE = new Set(['users', 'removed_users_ledger', 'detected_transactions']);
+  const delta = after - before;
+  const ok = LIVE.has(t) ? after > 0 : after === before;
+  const note = LIVE.has(t) ? ` (live${delta >= 0 ? ' +' : ' '}${delta} vs source)` : '';
   check(t.padEnd(22), ok, `${before} → ${after}${note}`);
 }
 
@@ -58,9 +59,14 @@ check('every product has a seller',
 check('category tree parents resolve',
   (await one(`SELECT COUNT(*) c FROM categories c LEFT JOIN categories p ON c.parent_id=p.id
               WHERE c.parent_id IS NOT NULL AND p.id IS NULL`)) === 0);
-check('telegram ids unique + preserved',
-  (await one(`SELECT COUNT(DISTINCT telegram_id) c FROM users WHERE telegram_id IS NOT NULL`)) ===
-  (await sOne(`SELECT COUNT(DISTINCT telegram_id) c FROM users`)) + 27);
+// Uniqueness is the real invariant; the count moves as users sign up and retire.
+const tgTotal = await one(`SELECT COUNT(*) c FROM users WHERE telegram_id IS NOT NULL`);
+const tgDistinct = await one(`SELECT COUNT(DISTINCT telegram_id) c FROM users WHERE telegram_id IS NOT NULL`);
+check('telegram ids unique', tgTotal === tgDistinct, `${tgDistinct} distinct of ${tgTotal}`);
+check('every migrated buyer still resolvable',
+  (await one(`SELECT COUNT(*) c FROM orders o
+                LEFT JOIN users u ON o.user_id = u.id
+               WHERE u.id IS NULL`)) === 0);
 
 const statuses = (await pool.query(`SELECT status, COUNT(*) c FROM orders GROUP BY status ORDER BY c DESC`)).rows;
 check('order statuses mapped to enum', statuses.length > 0,

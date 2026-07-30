@@ -40,13 +40,36 @@ class UsernameNormalizer {
     });
   }
 
+  /**
+   * Remove a user, preserving anything that references them.
+   *
+   * SQLite never enforced foreign keys here, so this DELETE used to succeed even
+   * for buyers with order history — silently orphaning those orders. (The shared
+   * Postgres database rejects it, which is how that long-standing data loss came
+   * to light.) When a user is still referenced, retire them in place instead:
+   * the row already carries status/reachable/unreachable_since for exactly this.
+   */
   _deleteUser(telegramId) {
-    return new Promise((resolve, reject) => {
+    const retire = (resolve, reject) => {
       db.run(
-        'DELETE FROM users WHERE telegram_id = ?',
-        [telegramId],
+        `UPDATE users
+            SET status = 'removed', reachable = 0, unreachable_since = ?
+          WHERE telegram_id = ?`,
+        [new Date().toISOString(), telegramId],
         function (err) { err ? reject(err) : resolve(this.changes); }
       );
+    };
+
+    return new Promise((resolve, reject) => {
+      db.run('DELETE FROM users WHERE telegram_id = ?', [telegramId], function (err) {
+        if (!err) return resolve(this.changes);
+        // 23503 = foreign_key_violation. Catching the error rather than
+        // enumerating referencing tables keeps this correct as the schema grows.
+        if (err.code === '23503' || /foreign key/i.test(err.message || '')) {
+          return retire(resolve, reject);
+        }
+        reject(err);
+      });
     });
   }
 
